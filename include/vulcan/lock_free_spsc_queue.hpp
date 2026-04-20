@@ -29,13 +29,12 @@ class LockFreeSPSCQueue {
     int get_front_order_id();
 
     private:
-    alignas(64) std::atomic<uint64_t> head = 0;
-    alignas(64) std::atomic<uint64_t> tail = 0;
+    alignas(std::hardware_destructive_interference_size) std::atomic<uint64_t> tail = 0;
     uint64_t head_cached;
+    alignas(std::hardware_destructive_interference_size) std::atomic<uint64_t> head = 0;
     uint64_t tail_cached;
-    QueueOrder* m_order = nullptr;
-    std::byte* raw_buffer = nullptr;
+    QueueOrder* m_order = nullptr; //8 bytes consumption
+    std::byte* raw_buffer = nullptr; //8 bytes consumption
     int capacity;
-
-    //int mIndexEnd; // at this, wrap indices around to 0
+    static constexpr int L = 4;
 };
