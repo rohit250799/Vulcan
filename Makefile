@@ -72,3 +72,8 @@ run_tests: $(TEST_BIN)
 # Clean
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR) $(LIB_DIR)
+
+#performance analysis
+analyze_performance:
+	perf stat -e cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses ./bin/vulcan
+
