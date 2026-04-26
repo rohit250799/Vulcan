@@ -15,13 +15,17 @@ struct alignas(64) QueueOrder {
 };
 
 struct alignas(64) Metadata_Producer {
-    std::atomic<uint64_t> tail = 0;
-    uint64_t head_cached;
+    std::atomic<size_t> tail = 0;
+    size_t head_cached;
+    static constexpr size_t mask = 7;
+    Metadata_Producer(size_t head_cached);
 };
 
 struct alignas(64) Metadata_Consumer {
-    std::atomic<uint64_t> head = 0;
-    uint64_t tail_cached;
+    std::atomic<size_t> head = 0;
+    size_t tail_cached;
+    int capacity;
+    static constexpr size_t mask = 7;
 };
 
 class LockFreeSPSCQueue {
@@ -41,9 +45,8 @@ class LockFreeSPSCQueue {
     int get_front_order_id();
 
     private:
+    static constexpr int L = 4;
     Metadata_Producer mProducer;
     Metadata_Consumer mConsumer;
-    int capacity;
-    static constexpr int L = 4;
     QueueOrder q[];
 };
