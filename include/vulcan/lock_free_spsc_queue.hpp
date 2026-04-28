@@ -20,13 +20,13 @@ class LockFreeSPSCQueue {
     static_assert((capacity & (capacity - 1)) == 0, "Capacity must be a power of two");
     public:
     struct alignas(64) Metadata_Producer {
-        std::atomic<size_t> tail = 0;
+        std::atomic<size_t> tail;
         size_t head_cached;
         static constexpr size_t mask = capacity - 1;
     };
 
     struct alignas(64) Metadata_Consumer {
-        std::atomic<size_t> head = 0;
+        std::atomic<size_t> head;
         size_t tail_cached;
         static constexpr size_t mask = capacity - 1;
     };
@@ -56,7 +56,7 @@ T* LockFreeSPSCQueue<T, capacity>::buffer() {
 }
 
 template<typename T, size_t capacity>
-LockFreeSPSCQueue<T, capacity>::LockFreeSPSCQueue() {
+LockFreeSPSCQueue<T, capacity>::LockFreeSPSCQueue() : mConsumer{0}, mProducer{0}  {
     assert(sizeof(Metadata_Producer) == 64 && "Size of metadata producer should be 64 bytes \n");
     assert(sizeof(Metadata_Consumer) == 64 && "Size of metadata consumer should be 64 bytes \n");
     assert(reinterpret_cast<uintptr_t>(this)%64 == 0 && "Assertion failed: Non functional core \n");
@@ -103,7 +103,6 @@ bool LockFreeSPSCQueue<T, capacity>::pop_order_from_queue() {
     size_t head = mConsumer.head.load(std::memory_order_relaxed);
     if (head == mConsumer.tail_cached) {
         //queue appears empty
-        //size_t tail = mProducer.tail.load(std::memory_order_acquire);
         mConsumer.tail_cached = mProducer.tail.load(std::memory_order_acquire);
         if (head == mConsumer.tail_cached) { return false; }
     }
