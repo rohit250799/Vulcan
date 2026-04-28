@@ -76,4 +76,11 @@ clean:
 #performance analysis
 analyze_performance:
 	perf stat -e cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses ./bin/vulcan
+	perf stat -e cycles,instructions,cache-misses,branch-misses ./bin/vulcan
 
+	perf stat -e cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses ./bin/tests_runner
+	perf stat -e cycles,instructions,cache-misses,branch-misses ./bin/tests_runner
+
+# get machine code
+machine:
+	objdump -D build/main.o
