@@ -29,7 +29,6 @@ void test_pop_operation_from_queue() {
 }
 
 void test_display_all_orders_in_queue() {
-    //my_queue->display_all_orders_in_queue();
     return;
 }
 
@@ -108,18 +107,31 @@ void test_single_thread_wrap_around() {
     assert(my_local_spsc_queue->queue_empty());
     // Pop from empty queue should fail
     assert(!my_local_spsc_queue->pop_order_from_queue());
-}
+}       
 
 void test_single_thread_full_or_empty_edge() {
     auto* my_local_spsc_queue = LockFreeSPSCQueue<QueueOrder, 2>::create();
-    assert(my_local_spsc_queue->queue_empty() == true && "Queue emptyness assertion failed \n");
-    assert(my_local_spsc_queue->queue_full() == false && "Queue fullness assertion failed \n");
-    assert(my_local_spsc_queue->push_order_into_queue({1, 193.33, 324}) == true && "Push assertion failed, 42 can't be pushed \n");
-    assert(my_local_spsc_queue->queue_empty() == false && "Queue emptyness assertion failed \n");
-    //my_local_spsc_queue->display_all_orders_in_queue();
-    assert(my_local_spsc_queue->queue_full() == true && "Queue fullness assertion failed \n");
-    assert(my_local_spsc_queue->push_order_into_queue({2, 19.32, 484}) == false && "Push assertion failed, 99 can't be pushed \n"); //problem when queue full
-    return;
+    
+    // Empty state
+    assert(my_local_spsc_queue->queue_empty() == true);
+    assert(my_local_spsc_queue->queue_full() == false);
+    
+    // Push 1 element (queue becomes full)
+    assert(my_local_spsc_queue->push_order_into_queue({1, 193.33, 324}) == true);
+    assert(my_local_spsc_queue->queue_empty() == false);
+    assert(my_local_spsc_queue->queue_full() == true);  // Full after 1 element
+    
+    // Try to push 2nd element (should fail - queue full)
+    assert(my_local_spsc_queue->push_order_into_queue({2, 19.32, 484}) == false);
+    
+    // Pop the element (queue becomes empty again)
+    assert(my_local_spsc_queue->pop_order_from_queue() == true);
+    assert(my_local_spsc_queue->queue_empty() == true);
+    assert(my_local_spsc_queue->queue_full() == false);
+    
+    // Now push should work again
+    assert(my_local_spsc_queue->push_order_into_queue({2, 19.32, 484}) == true);
+    assert(my_local_spsc_queue->queue_full() == true);
 }
 
 void test_concurrent_correctness_with_verification() {
