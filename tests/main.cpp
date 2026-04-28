@@ -37,13 +37,15 @@ int main() {
     // prod_thread.detach();
     // consumer_thread.detach();
     test_single_thread_boundary_validation();
+    std::cout << "Single thread boundary validation test passed \n";
     //bool queue_emptyness_state = test_queue_empty();
     //std::cout << "The queue emptyness state is: " << queue_emptyness_state << " \n";
     // prod_thread.join();
     // consumer_thread.join();
+    std::cout << "Test single thread wrap around \n";
     test_single_thread_wrap_around();
     test_single_thread_full_or_empty_edge();
     std::cout << "[TEST] All tests passed... \n";
-    test_display_all_orders_in_queue();
+    //test_display_all_orders_in_queue();
     return 0;
 }
