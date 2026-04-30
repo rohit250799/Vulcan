@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
+#include <sys/mman.h>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -31,6 +33,7 @@ class LockFreeSPSCQueue {
         static constexpr size_t mask = capacity - 1;
     };
 
+    static LockFreeSPSCQueue* allocate_huge_pages();
     LockFreeSPSCQueue();
     ~LockFreeSPSCQueue() = default;
     LockFreeSPSCQueue(const LockFreeSPSCQueue&) = delete;
@@ -51,15 +54,29 @@ class LockFreeSPSCQueue {
 };
 
 template<typename T, size_t capacity>
+LockFreeSPSCQueue<T, capacity>* LockFreeSPSCQueue<T, capacity>::allocate_huge_pages() {
+    const size_t boundary = 2 * 1024 * 1024;
+    size_t base_size_of_class = sizeof(LockFreeSPSCQueue<T, capacity>);
+    size_t rounded_size = (base_size_of_class + (boundary - 1)) & ~(boundary - 1);
+    
+    auto* mem_ptr = mmap(NULL, rounded_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0);
+    if (mem_ptr == MAP_FAILED) {
+        perror("mmap");
+        return nullptr;
+    }
+    return mem_ptr;
+}
+
+template<typename T, size_t capacity>
 T* LockFreeSPSCQueue<T, capacity>::buffer() {
     return reinterpret_cast<T*>(reinterpret_cast<char*>(this) + 2 * 64);
 }
 
 template<typename T, size_t capacity>
-LockFreeSPSCQueue<T, capacity>::LockFreeSPSCQueue() : mConsumer{0}, mProducer{0}  {
+LockFreeSPSCQueue<T, capacity>::LockFreeSPSCQueue() : mProducer{0, 0}, mConsumer{0, 0} {
     assert(sizeof(Metadata_Producer) == 64 && "Size of metadata producer should be 64 bytes \n");
     assert(sizeof(Metadata_Consumer) == 64 && "Size of metadata consumer should be 64 bytes \n");
-    assert(reinterpret_cast<uintptr_t>(this)%64 == 0 && "Assertion failed: Non functional core \n");
+    assert(reinterpret_cast<uintptr_t>(this)%64 == 0 && "Assertion failed: Non functional core.. \n");
     assert(mProducer.mask == mConsumer.mask && "Mask in both producer and consumer threads should be equal \n");
     assert(sizeof(QueueOrder) % 64 == 0 && "QueueOrders should be 64 bytes in size \n");
 }
@@ -93,7 +110,7 @@ bool LockFreeSPSCQueue<T, capacity>::push_order_into_queue(const QueueOrder& qOr
         if (next_tail == mProducer.head_cached) { return false; }
     }
     auto buffer_address = reinterpret_cast<std::byte*>(this) + 128 + (tail * 64);
-    new (reinterpret_cast<void*>(buffer_address)) QueueOrder(qOrder);
+    new (reinterpret_cast<void*>(buffer_address)) QueueOrder(qOrder); 
     mProducer.tail.store(next_tail, std::memory_order_release);
     return true;
 }
@@ -106,7 +123,7 @@ bool LockFreeSPSCQueue<T, capacity>::pop_order_from_queue() {
         mConsumer.tail_cached = mProducer.tail.load(std::memory_order_acquire);
         if (head == mConsumer.tail_cached) { return false; }
     }
-    size_t slot_index = head & (capacity - 1);
+    //size_t slot_index = head & (capacity - 1); - popped element
     mConsumer.head.store((head+1)&(capacity-1), std::memory_order_release);
     return true;
 }
