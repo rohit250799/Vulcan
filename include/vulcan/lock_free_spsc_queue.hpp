@@ -4,6 +4,9 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdio>
+#include <exception>
+#include <fstream>
+#include <string>
 #include <sys/mman.h>
 #include <iostream>
 #include <iterator>
@@ -38,6 +41,7 @@ class LockFreeSPSCQueue {
     ~LockFreeSPSCQueue() = default;
     LockFreeSPSCQueue(const LockFreeSPSCQueue&) = delete;
     LockFreeSPSCQueue& operator=(const LockFreeSPSCQueue&) = delete;
+    //bool pre_allocate_huge_page_pool();
     bool push_order_into_queue(const QueueOrder& qOrder);
     static LockFreeSPSCQueue* create();
     static void destroy(LockFreeSPSCQueue* ptr);
@@ -52,20 +56,6 @@ class LockFreeSPSCQueue {
     Metadata_Producer mProducer;
     Metadata_Consumer mConsumer;
 };
-
-template<typename T, size_t capacity>
-LockFreeSPSCQueue<T, capacity>* LockFreeSPSCQueue<T, capacity>::allocate_huge_pages() {
-    const size_t boundary = 2 * 1024 * 1024;
-    size_t base_size_of_class = sizeof(LockFreeSPSCQueue<T, capacity>);
-    size_t rounded_size = (base_size_of_class + (boundary - 1)) & ~(boundary - 1);
-    
-    auto* mem_ptr = mmap(NULL, rounded_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0);
-    if (mem_ptr == MAP_FAILED) {
-        perror("mmap");
-        return nullptr;
-    }
-    return mem_ptr;
-}
 
 template<typename T, size_t capacity>
 T* LockFreeSPSCQueue<T, capacity>::buffer() {
@@ -84,11 +74,28 @@ LockFreeSPSCQueue<T, capacity>::LockFreeSPSCQueue() : mProducer{0, 0}, mConsumer
 //static factory method for class is the buffer allocation
 template<typename T, size_t capacity>
 LockFreeSPSCQueue<T, capacity>* LockFreeSPSCQueue<T, capacity>::create() {
-    void* raw_memory_ptr = nullptr;
-    size_t required_bytes = (capacity * sizeof(QueueOrder) + sizeof(Metadata_Producer) + sizeof(Metadata_Consumer));
-    int returned_result = posix_memalign(&raw_memory_ptr, 64, required_bytes);
-    assert(returned_result == 0 && "Posix memalign assertion failed \n");
-    LockFreeSPSCQueue* obj = new (raw_memory_ptr) LockFreeSPSCQueue();
+    const std::string required_proc_file_path = "/proc/sys/vm/nr_hugepages";
+    std::ifstream proc_file(required_proc_file_path);
+    if (!proc_file.is_open()) {
+        std::cerr << "Could not open file from path: " << required_proc_file_path << " \n";
+        std::terminate();
+    }
+    int current_huge_pages = proc_file.get() - '0';
+    std::cout << "The huge pages value is: " << current_huge_pages << " \n";
+    if (current_huge_pages != 1) {
+        std::cerr << "Huge pages still not 1. Terminating the program \n";
+        std::terminate();
+    }
+    proc_file.close();
+    const size_t boundary = 2 * 1024 * 1024;
+    size_t base_size_of_class = sizeof(LockFreeSPSCQueue<T, capacity>);
+    size_t rounded_size = (base_size_of_class + (boundary - 1)) & ~(boundary - 1);
+    auto* mem_ptr = mmap(NULL, rounded_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0);
+    if (mem_ptr == MAP_FAILED) {
+        perror("mmap");
+        std::terminate();
+    }
+    LockFreeSPSCQueue* obj = new (mem_ptr) LockFreeSPSCQueue();
     return obj;
 }
 
@@ -110,7 +117,7 @@ bool LockFreeSPSCQueue<T, capacity>::push_order_into_queue(const QueueOrder& qOr
         if (next_tail == mProducer.head_cached) { return false; }
     }
     auto buffer_address = reinterpret_cast<std::byte*>(this) + 128 + (tail * 64);
-    new (reinterpret_cast<void*>(buffer_address)) QueueOrder(qOrder); 
+    new (reinterpret_cast<void*>(buffer_address)) QueueOrder(qOrder);
     mProducer.tail.store(next_tail, std::memory_order_release);
     return true;
 }
