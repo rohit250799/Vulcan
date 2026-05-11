@@ -7,7 +7,7 @@
 #include "vulcan/lock_free_spsc_queue.hpp"
 
 int main() {
-    auto* my_queue = LockFreeSPSCQueue<QueueOrder, 4>::create();
+    auto* my_queue = LockFreeSPSCQueue<QueueOrder, 256>::create();
     std::cout << "The emptyness state of the queue is: " << my_queue->queue_empty() << " \n";
     my_queue->push_order_into_queue({100, 22.32, 232});
     my_queue->push_order_into_queue({101, 23, 49});
