@@ -31,7 +31,8 @@ This Queue stores QueueOrder instances inside it upto a certain capacity. Its cr
 script first for the pre-allocated memory.
 
 Filling the entire allocated block (2 mb) of a Huge Page with the byte value: 0x00 for deterministic warming of scope and value. 
-To solve **problem number 4**, 4 steps need to be taken - Modifying GRUB config -> Declaring Pool size -> Committing and Persistent Pinning -> Verification
+To solve **problem number 4**, 4 steps need to be taken - Modifying GRUB config -> Declaring Pool size -> Committing and Persistent Pinning -> Verification. Appending **hugepahes=16** to **GRUB_CMDLINE_LINUX_DEFAULT**
+in **/etc/default/grub** file, updating the GRUB bootloader and then rebooting. 
 
 Current problems:
 1. My AMD Zen 3 has L1 Data Cache per core of 32 kb. So, if I create the SPSC Queue with 1024 capacity, so the memory needed to store the QueueOrders = 1024 * 64 = 64 kb, which is more than L1 cache
