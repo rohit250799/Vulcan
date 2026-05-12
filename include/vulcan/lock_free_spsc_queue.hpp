@@ -75,7 +75,6 @@ LockFreeSPSCQueue<T, capacity>::LockFreeSPSCQueue() : mProducer{0, 0}, mConsumer
     assert(sizeof(Metadata_Producer) == 64 && "Size of metadata producer should be 64 bytes \n");
     assert(sizeof(Metadata_Consumer) == 64 && "Size of metadata consumer should be 64 bytes \n");
     //char* offset_ptr = (char*)obj + 128;
-    //assert();
     assert(reinterpret_cast<uintptr_t>(this)%64 == 0 && "Assertion failed: Non functional core.. \n");
     assert(mProducer.mask == mConsumer.mask && "Mask in both producer and consumer threads should be equal \n");
     assert(sizeof(QueueOrder) % 64 == 0 && "QueueOrders should be 64 bytes in size \n");
@@ -109,11 +108,11 @@ LockFreeSPSCQueue<T, capacity>* LockFreeSPSCQueue<T, capacity>::create() {
     char* offset_ptr = (char*)obj + 128;
     size_t L1_stride = 2048;
     assert(((uintptr_t)offset_ptr % L1_stride) != 0 && "Buffer offset should not be a multiple of L1 critical stride \n");
-    __m128i* simd_obj_ptr = reinterpret_cast<__m128i*>(&mem_ptr);
-    //__m128i* simd_obj_ptr = reinterpret_cast<__m128i*>(&obj);
+    __m128i* simd_obj_ptr = reinterpret_cast<__m128i*>(mem_ptr);
     __m128i zero_vector = _mm_setzero_si128();
+    static_cast<char*>(mem_ptr)[0] = 0;
 
-    for(size_t i = 0; i < 2*1024*1024; i += 16) {
+    for(size_t i = 0; i < (2*1024*1024) / 16; ++i) {
         _mm_stream_si128(simd_obj_ptr + i, zero_vector);
     }
     return obj;
