@@ -53,7 +53,7 @@ class LockFreeSPSCQueue {
     bool push_order_into_queue(const QueueOrder& qOrder);
     static LockFreeSPSCQueue* create();
     static void destroy(LockFreeSPSCQueue* ptr);
-    bool pop_order_from_queue();
+    const T* pop_order_from_queue();
     bool queue_full();
     bool queue_empty();
     int get_queue_current_size();
@@ -142,15 +142,18 @@ bool LockFreeSPSCQueue<T, capacity>::push_order_into_queue(const QueueOrder& qOr
 }
 
 template<typename T, size_t capacity>
-bool LockFreeSPSCQueue<T, capacity>::pop_order_from_queue() {
+const T* LockFreeSPSCQueue<T, capacity>::pop_order_from_queue() {
     size_t head = mConsumer.head.load(std::memory_order_relaxed);
     if (head == mConsumer.tail_cached) {
         //queue appears empty
         mConsumer.tail_cached = mProducer.tail.load(std::memory_order_acquire);
-        if (head == mConsumer.tail_cached) { return false; }
+        if (head == mConsumer.tail_cached) { return nullptr; }
     }
+    const T* popped_element = reinterpret_cast<const T*>(
+        reinterpret_cast<const char*>(this) + 128 + ((head) & (capacity - 1)) * 64
+    );
     mConsumer.head.store((head+1)&(capacity-1), std::memory_order_release);
-    return true;
+    return popped_element;
 }
 
 template<typename T, size_t capacity>
