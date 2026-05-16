@@ -9,6 +9,7 @@
 #include <cstring>
 #include <emmintrin.h>
 #include <exception>
+#include <utility>
 #include <fstream>
 #include <string>
 #include <sys/mman.h>
@@ -18,6 +19,7 @@
 #include <new>
 #include <stdatomic.h>
 #include <smmintrin.h>
+#include <type_traits>
 #include <xmmintrin.h>
 
 struct alignas(64) QueueOrder {
@@ -53,6 +55,7 @@ class LockFreeSPSCQueue {
     bool push_order_into_queue(const QueueOrder& qOrder);
     static LockFreeSPSCQueue* create();
     static void destroy(LockFreeSPSCQueue* ptr);
+    std::pair<const T*, size_t> peek_into_queue();
     const T* pop_order_from_queue();
     bool queue_full();
     bool queue_empty();
@@ -142,18 +145,25 @@ bool LockFreeSPSCQueue<T, capacity>::push_order_into_queue(const QueueOrder& qOr
 }
 
 template<typename T, size_t capacity>
-const T* LockFreeSPSCQueue<T, capacity>::pop_order_from_queue() {
+std::pair<const T*, size_t> LockFreeSPSCQueue<T, capacity>::peek_into_queue() {
     size_t head = mConsumer.head.load(std::memory_order_relaxed);
     if (head == mConsumer.tail_cached) {
-        //queue appears empty
         mConsumer.tail_cached = mProducer.tail.load(std::memory_order_acquire);
-        if (head == mConsumer.tail_cached) { return nullptr; }
+        if (head == mConsumer.tail_cached) { return {nullptr, 0}; }
     }
-    const T* popped_element = reinterpret_cast<const T*>(
-        reinterpret_cast<const char*>(this) + 128 + ((head) & (capacity - 1)) * 64
+    const T* popped_element_ptr = reinterpret_cast<const T*>(
+        reinterpret_cast<const char*>(this) + 128 + (head << 6)
     );
-    mConsumer.head.store((head+1)&(capacity-1), std::memory_order_release);
-    return popped_element;
+    return {popped_element_ptr, head};
+}
+
+template<typename T, size_t capacity>
+const T* LockFreeSPSCQueue<T, capacity>::pop_order_from_queue() {
+    constexpr bool is_non_pod = !(std::is_trivial_v<T> && std::is_standard_layout_v<T>);
+    auto [current_head, current_head_index]  = peek_into_queue();
+    if (is_non_pod) { current_head->~T(); }
+    mConsumer.head.store((current_head_index + 1)&(capacity-1), std::memory_order_release);
+    return current_head;
 }
 
 template<typename T, size_t capacity>
