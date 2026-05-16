@@ -9,6 +9,7 @@
 #include <cstring>
 #include <emmintrin.h>
 #include <exception>
+#include <utility>
 #include <fstream>
 #include <string>
 #include <sys/mman.h>
@@ -18,6 +19,7 @@
 #include <new>
 #include <stdatomic.h>
 #include <smmintrin.h>
+#include <type_traits>
 #include <xmmintrin.h>
 
 struct alignas(64) QueueOrder {
@@ -53,7 +55,8 @@ class LockFreeSPSCQueue {
     bool push_order_into_queue(const QueueOrder& qOrder);
     static LockFreeSPSCQueue* create();
     static void destroy(LockFreeSPSCQueue* ptr);
-    bool pop_order_from_queue();
+    std::pair<const T*, size_t> peek_into_queue();
+    const T* pop_order_from_queue();
     bool queue_full();
     bool queue_empty();
     int get_queue_current_size();
@@ -75,7 +78,6 @@ LockFreeSPSCQueue<T, capacity>::LockFreeSPSCQueue() : mProducer{0, 0}, mConsumer
     assert(sizeof(Metadata_Producer) == 64 && "Size of metadata producer should be 64 bytes \n");
     assert(sizeof(Metadata_Consumer) == 64 && "Size of metadata consumer should be 64 bytes \n");
     //char* offset_ptr = (char*)obj + 128;
-    //assert();
     assert(reinterpret_cast<uintptr_t>(this)%64 == 0 && "Assertion failed: Non functional core.. \n");
     assert(mProducer.mask == mConsumer.mask && "Mask in both producer and consumer threads should be equal \n");
     assert(sizeof(QueueOrder) % 64 == 0 && "QueueOrders should be 64 bytes in size \n");
@@ -109,11 +111,11 @@ LockFreeSPSCQueue<T, capacity>* LockFreeSPSCQueue<T, capacity>::create() {
     char* offset_ptr = (char*)obj + 128;
     size_t L1_stride = 2048;
     assert(((uintptr_t)offset_ptr % L1_stride) != 0 && "Buffer offset should not be a multiple of L1 critical stride \n");
-    __m128i* simd_obj_ptr = reinterpret_cast<__m128i*>(&mem_ptr);
-    //__m128i* simd_obj_ptr = reinterpret_cast<__m128i*>(&obj);
+    __m128i* simd_obj_ptr = reinterpret_cast<__m128i*>(mem_ptr);
     __m128i zero_vector = _mm_setzero_si128();
+    static_cast<char*>(mem_ptr)[0] = 0;
 
-    for(size_t i = 0; i < 2*1024*1024; i += 16) {
+    for(size_t i = 0; i < (2*1024*1024) / 16; ++i) {
         _mm_stream_si128(simd_obj_ptr + i, zero_vector);
     }
     return obj;
@@ -143,15 +145,25 @@ bool LockFreeSPSCQueue<T, capacity>::push_order_into_queue(const QueueOrder& qOr
 }
 
 template<typename T, size_t capacity>
-bool LockFreeSPSCQueue<T, capacity>::pop_order_from_queue() {
+std::pair<const T*, size_t> LockFreeSPSCQueue<T, capacity>::peek_into_queue() {
     size_t head = mConsumer.head.load(std::memory_order_relaxed);
     if (head == mConsumer.tail_cached) {
-        //queue appears empty
         mConsumer.tail_cached = mProducer.tail.load(std::memory_order_acquire);
-        if (head == mConsumer.tail_cached) { return false; }
+        if (head == mConsumer.tail_cached) { return {nullptr, 0}; }
     }
-    mConsumer.head.store((head+1)&(capacity-1), std::memory_order_release);
-    return true;
+    const T* popped_element_ptr = reinterpret_cast<const T*>(
+        reinterpret_cast<const char*>(this) + 128 + (head << 6)
+    );
+    return {popped_element_ptr, head};
+}
+
+template<typename T, size_t capacity>
+const T* LockFreeSPSCQueue<T, capacity>::pop_order_from_queue() {
+    constexpr bool is_non_pod = !(std::is_trivial_v<T> && std::is_standard_layout_v<T>);
+    auto [current_head, current_head_index]  = peek_into_queue();
+    if (is_non_pod) { current_head->~T(); }
+    mConsumer.head.store((current_head_index + 1)&(capacity-1), std::memory_order_release);
+    return current_head;
 }
 
 template<typename T, size_t capacity>
