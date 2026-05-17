@@ -9,7 +9,6 @@
 #include <cstring>
 #include <emmintrin.h>
 #include <exception>
-#include <utility>
 #include <fstream>
 #include <string>
 #include <sys/mman.h>
@@ -55,8 +54,8 @@ class LockFreeSPSCQueue {
     bool push_order_into_queue(const QueueOrder& qOrder);
     static LockFreeSPSCQueue* create();
     static void destroy(LockFreeSPSCQueue* ptr);
-    std::pair<const T*, size_t> peek_into_queue();
-    const T* pop_order_from_queue();
+    const T* peek_into_queue(const size_t& current_index);
+    void commit_pop_order_from_queue(const T* ptr, size_t index);
     bool queue_full();
     bool queue_empty();
     int get_queue_current_size();
@@ -77,7 +76,6 @@ template<typename T, size_t capacity>
 LockFreeSPSCQueue<T, capacity>::LockFreeSPSCQueue() : mProducer{0, 0}, mConsumer{0, 0} {
     assert(sizeof(Metadata_Producer) == 64 && "Size of metadata producer should be 64 bytes \n");
     assert(sizeof(Metadata_Consumer) == 64 && "Size of metadata consumer should be 64 bytes \n");
-    //char* offset_ptr = (char*)obj + 128;
     assert(reinterpret_cast<uintptr_t>(this)%64 == 0 && "Assertion failed: Non functional core.. \n");
     assert(mProducer.mask == mConsumer.mask && "Mask in both producer and consumer threads should be equal \n");
     assert(sizeof(QueueOrder) % 64 == 0 && "QueueOrders should be 64 bytes in size \n");
@@ -145,25 +143,24 @@ bool LockFreeSPSCQueue<T, capacity>::push_order_into_queue(const QueueOrder& qOr
 }
 
 template<typename T, size_t capacity>
-std::pair<const T*, size_t> LockFreeSPSCQueue<T, capacity>::peek_into_queue() {
+const T* LockFreeSPSCQueue<T, capacity>::peek_into_queue(const size_t& current_index) {
     size_t head = mConsumer.head.load(std::memory_order_relaxed);
     if (head == mConsumer.tail_cached) {
         mConsumer.tail_cached = mProducer.tail.load(std::memory_order_acquire);
-        if (head == mConsumer.tail_cached) { return {nullptr, 0}; }
+        if (head == mConsumer.tail_cached) { return nullptr; }
     }
     const T* popped_element_ptr = reinterpret_cast<const T*>(
-        reinterpret_cast<const char*>(this) + 128 + (head << 6)
+        reinterpret_cast<const char*>(this) + 128 + (current_index << 6)
     );
-    return {popped_element_ptr, head};
+    return popped_element_ptr;
 }
 
 template<typename T, size_t capacity>
-const T* LockFreeSPSCQueue<T, capacity>::pop_order_from_queue() {
+void LockFreeSPSCQueue<T, capacity>::commit_pop_order_from_queue(const T* ptr, size_t index) {
     constexpr bool is_non_pod = !(std::is_trivial_v<T> && std::is_standard_layout_v<T>);
-    auto [current_head, current_head_index]  = peek_into_queue();
-    if (is_non_pod) { current_head->~T(); }
-    mConsumer.head.store((current_head_index + 1)&(capacity-1), std::memory_order_release);
-    return current_head;
+    if (is_non_pod) { ptr->~T(); }
+    mConsumer.head.store((index + 1)&(capacity-1), std::memory_order_release);
+    return;
 }
 
 template<typename T, size_t capacity>
