@@ -31,7 +31,7 @@ This Queue stores QueueOrder instances inside it upto a certain capacity. Its cr
 script first for the pre-allocated memory.
 
 Filling the entire allocated block (2 mb) of a Huge Page with the byte value: 0x00 for deterministic warming of scope and value. 
-To solve **problem number 4**, 4 steps need to be taken - Modifying GRUB config -> Declaring Pool size -> Committing and Persistent Pinning -> Verification. Appending **hugepahes=16** to **GRUB_CMDLINE_LINUX_DEFAULT**
+To solve **problem number 4**, 4 steps need to be taken - Modifying GRUB config -> Declaring Pool size -> Committing and Persistent Pinning -> Verification. Appending **hugepages=16** to **GRUB_CMDLINE_LINUX_DEFAULT**
 in **/etc/default/grub** file, updating the GRUB bootloader and then rebooting.
 
 Splitting the monolithic pop function and implementing the **Pinning Pattern** by splitting the operation into 2 phases: **Access** and **Release**
