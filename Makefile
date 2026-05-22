@@ -1,5 +1,8 @@
 CXX = g++
-CXXFLAGS = -Iinclude -Wall -Wextra -std=c++17 -O2 -g
+CXXFLAGS = -Iinclude -Wall -Wextra -std=c++17 -O2 -pthread -g
+
+# Linker flags: Add the benchmark library and pthread
+LDFLAGS = -lbenchmark -lpthread
 
 BUILD_DIR = build
 BIN_DIR = bin
@@ -51,6 +54,10 @@ $(BUILD_DIR)/main.o: main.cpp
 # Compile src files
 $(BUILD_DIR)/%.o: src/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+	
+# Build your benchmark executable (separate binary)
+benchmark: benchmark.cpp $(SOURCES) # Assuming your benchmark code is in benchmark.cpp
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
 
 # Build tests
