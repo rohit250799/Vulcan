@@ -24,6 +24,9 @@ To find the error using a degugger, use these commands and maintain the ordering
 3. **run** - if successfully entered the GDB Shell
 4. **backtrace**
 
+Current performance analysis:
+![Current performance analysis](screenshots/current_performance_analysis.png)
+
 Currently working on:
 1. **Lock-free SPSC circular Queue**
 This Queue stores QueueOrder instances inside it upto a certain capacity. Its created inside the pre-allocated memory directly using placement new in static factory method. It contains 2 member variables 
@@ -36,8 +39,12 @@ in **/etc/default/grub** file, updating the GRUB bootloader and then rebooting.
 
 Splitting the monolithic pop function and implementing the **Pinning Pattern** by splitting the operation into 2 phases: **Access** and **Release**
 
-Current performance analysis:
-![Current performance evaluation](screenshots/current_performance_evaluation.png)
+Using **native_handle()** for **Thread Management with CPU Affinity** (Pinning a thread to a specific CPU core). Hardware Architecture varies drastically between different OS and require native_handle() to bypass the 
+C++ abstraction and speak directly to the OS Kernel. So, to pin a thread  - we must pass the OS specific thread identifier directly to the Kernel API's and since (Windows and Linux) handle CPU scheduling differently,
+we need to use the native handle of the OS.
+
+Current overhead:
+![Current overhead](screenshots/current_overhead.png)
 
 Current problems:
 1. My AMD Zen 3 has L1 Data Cache per core of 32 kb. So, if I create the SPSC Queue with 1024 capacity, so the memory needed to store the QueueOrders = 1024 * 64 = 64 kb, which is more than L1 cache
