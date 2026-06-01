@@ -1,0 +1,9 @@
+# started on Mon Jun  1 17:57:35 2026
+
+29370607464,,cycles,6470377135,71.00,,
+5752153991,,instructions,6469472791,71.00,0.20,insn per cycle
+610936516,,cache-references,6470249515,71.00,,
+274304298,,cache-misses,6469877652,71.00,44.90,of all cache refs
+433386476,,L1-dcache-load-misses,6468909816,71.00,,
+10581,,dTLB-load-misses,6470626557,71.00,,
+40983888,,branch-misses,6470756884,71.00,,
