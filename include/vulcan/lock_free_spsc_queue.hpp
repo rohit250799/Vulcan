@@ -50,6 +50,8 @@ class LockFreeSPSCQueue {
     ~LockFreeSPSCQueue() = default;
     LockFreeSPSCQueue(const LockFreeSPSCQueue&) = delete;
     LockFreeSPSCQueue& operator=(const LockFreeSPSCQueue&) = delete;
+    LockFreeSPSCQueue(LockFreeSPSCQueue&&) = delete;
+    LockFreeSPSCQueue& operator=(LockFreeSPSCQueue&& other) noexcept = delete;
     inline size_t load_head_acquire() noexcept;
     inline size_t load_tail_acquire() noexcept;
     bool push_order_into_queue(const QueueOrder& qOrder);
@@ -87,8 +89,7 @@ template<typename T, size_t capacity>
 
 template<typename T, size_t capacity>
 LockFreeSPSCQueue<T, capacity>::LockFreeSPSCQueue() : mProducer{0, 0}, mConsumer{0, 0} {
-    assert(sizeof(Metadata_Producer) == 64 && "Size of metadata producer should be 64 bytes \n");
-    assert(sizeof(Metadata_Consumer) == 64 && "Size of metadata consumer should be 64 bytes \n");
+    assert(sizeof(Metadata_Producer) == 64 && "Size of metadata producer should be 64 bytes \n");    assert(sizeof(Metadata_Consumer) == 64 && "Size of metadata consumer should be 64 bytes \n");
     assert(reinterpret_cast<uintptr_t>(this)%64 == 0 && "Assertion failed: Non functional core.. \n");
     assert(mProducer.mask == mConsumer.mask && "Mask in both producer and consumer threads should be equal \n");
     assert(sizeof(QueueOrder) % 64 == 0 && "QueueOrders should be 64 bytes in size \n");
