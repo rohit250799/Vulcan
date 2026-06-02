@@ -66,7 +66,8 @@ void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
         local_current_tail = next_local_tail;
         batch_count ++;
         if ((batch_count & 7) == 0) {
-            lock_free_queue_ref.mProducer.tail.store(local_current_tail, std::memory_order_release);
+            lock_free_queue_ref.publish_tail_release(local_current_tail);
+            //lock_free_queue_ref.mProducer.tail.store(local_current_tail, std::memory_order_release);
         }
         //local_current_tail = (local_current_tail + 1) & 255;
     }
@@ -97,14 +98,15 @@ void benchmark_consumer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
         const QueueOrder* current_head_index_ptr = lock_free_queue_ref.peek_into_queue(local_head_idx);
         while (!current_head_index_ptr) {
             _mm_pause();
-            //current_head_index_ptr = lock_free_queue_ref.peek_into_queue(local_head_idx);
+            current_head_index_ptr = lock_free_queue_ref.peek_into_queue(local_head_idx);
         }
         local_register_accumulator += current_head_index_ptr->price;
         lock_free_queue_ref.commit_pop_order_from_queue(current_head_index_ptr, local_head_idx);
         local_head_idx = (local_head_idx + 1) & 255;
         batch_count ++;
         if ((batch_count & 7) == 0) {
-            lock_free_queue_ref.mConsumer.head.store(local_head_idx, std::memory_order_release);
+            //lock_free_queue_ref.mConsumer.head.store(local_head_idx, std::memory_order_release);
+            lock_free_queue_ref.publish_head_release(local_head_idx);
         }
     }
     _mm_lfence();
@@ -115,10 +117,6 @@ void benchmark_consumer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
     std::cout  << "The cycles per element in consumer benchmark is: " << cycles_per_element << " \n";
     return;
 }
-
-// void calculate_performance_metrics() {
-//     auto timer_tax_adjusted_total_cycles_for_producer = benchmark_producer(int &lock_free_queue_ref, std::atomic<bool> &m_start_ref)
-// }
 
 int main() {
     auto* my_Lock_Free_Queue = LockFreeSPSCQueue<QueueOrder, 256>::create();
