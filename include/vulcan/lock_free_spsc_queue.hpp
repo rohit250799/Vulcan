@@ -31,18 +31,16 @@ template <typename T, size_t capacity>
 class LockFreeSPSCQueue {
     static_assert((capacity & (capacity - 1)) == 0, "Capacity must be a power of two");
     public:
-    struct alignas(64) Metadata_Producer {
+    struct alignas(std::hardware_destructive_interference_size) Metadata_Producer {
         std::atomic<size_t> tail;
         size_t head_cached;
         static constexpr size_t mask = capacity - 1;
-        char padding[64 - ( (sizeof(uint64_t) * 2) % 64 )];
     };
 
-    struct alignas(64) Metadata_Consumer {
+    struct alignas(std::hardware_destructive_interference_size) Metadata_Consumer {
         std::atomic<size_t> head;
         size_t tail_cached;
         static constexpr size_t mask = capacity - 1;
-        char padding[64 - ( (sizeof(uint64_t) * 2) % 64 )];
     };
 
     static LockFreeSPSCQueue* allocate_huge_pages();
@@ -54,6 +52,10 @@ class LockFreeSPSCQueue {
     LockFreeSPSCQueue& operator=(LockFreeSPSCQueue&& other) noexcept = delete;
     inline size_t load_head_acquire() noexcept;
     inline size_t load_tail_acquire() noexcept;
+    void producer_uncommitted_push(QueueOrder& qOrder, size_t current_local_tail);
+    void* consumer_uncommitted_peek(size_t consumer_local_head);
+    inline void publish_tail_release(size_t new_local_tail);
+    inline void publish_head_release(size_t new_local_head);
     bool push_order_into_queue(const QueueOrder& qOrder);
     static LockFreeSPSCQueue* create();
     static void destroy(LockFreeSPSCQueue* ptr);
@@ -81,7 +83,32 @@ size_t LockFreeSPSCQueue<T, capacity>::load_tail_acquire() noexcept {
     mProducer.tail.load(std::memory_order_acquire);
     return mProducer.tail;
 }
-    
+
+template<typename T, size_t capacity>
+void LockFreeSPSCQueue<T, capacity>::producer_uncommitted_push(QueueOrder& qOrder, size_t current_local_tail) {
+    auto buffer_address = reinterpret_cast<std::byte*>((this) + 128 + (current_local_tail & 255) * 64);
+    new (reinterpret_cast<void*>(buffer_address)) QueueOrder(qOrder);
+    return;
+}
+
+template<typename T, size_t capacity>
+void* consumer_uncommitted_peek(size_t consumer_local_head) {
+    void* memory_address = reinterpret_cast<void*>(consumer_local_head);
+    return memory_address;
+}
+
+template<typename T, size_t capacity>
+void LockFreeSPSCQueue<T, capacity>::publish_tail_release(size_t new_local_tail) {
+    mProducer.tail.store(new_local_tail, std::memory_order_release);
+    return;
+}
+
+template<typename T, size_t capacity>
+void LockFreeSPSCQueue<T, capacity>::publish_head_release(size_t new_local_head) {
+    mConsumer.head.store(new_local_head, std::memory_order_release);
+    return;
+}
+
 template<typename T, size_t capacity>
 [[nodiscard]] __restrict const T* LockFreeSPSCQueue<T, capacity>::buffer() noexcept {
     return reinterpret_cast<T*>(reinterpret_cast<char*>(this) + 2 * 64);
@@ -89,7 +116,8 @@ template<typename T, size_t capacity>
 
 template<typename T, size_t capacity>
 LockFreeSPSCQueue<T, capacity>::LockFreeSPSCQueue() : mProducer{0, 0}, mConsumer{0, 0} {
-    assert(sizeof(Metadata_Producer) == 64 && "Size of metadata producer should be 64 bytes \n");    assert(sizeof(Metadata_Consumer) == 64 && "Size of metadata consumer should be 64 bytes \n");
+    assert(sizeof(Metadata_Producer) == 64 && "Size of metadata producer should be 64 bytes \n");
+    assert(sizeof(Metadata_Consumer) == 64 && "Size of metadata consumer should be 64 bytes \n");
     assert(reinterpret_cast<uintptr_t>(this)%64 == 0 && "Assertion failed: Non functional core.. \n");
     assert(mProducer.mask == mConsumer.mask && "Mask in both producer and consumer threads should be equal \n");
     assert(sizeof(QueueOrder) % 64 == 0 && "QueueOrders should be 64 bytes in size \n");
@@ -150,7 +178,7 @@ bool LockFreeSPSCQueue<T, capacity>::push_order_into_queue(const QueueOrder& qOr
         mProducer.head_cached = head;
         if (next_tail == mProducer.head_cached) [[unlikely]] { return false; }
     }
-    auto buffer_address = reinterpret_cast<std::byte*>(this) + 128 + (tail * 64);
+    auto buffer_address = reinterpret_cast<std::byte*>(this) + 128 + (tail << 6);
     new (reinterpret_cast<void*>(buffer_address)) QueueOrder(qOrder);
     mProducer.tail.store(next_tail, std::memory_order_release);
     return true;
