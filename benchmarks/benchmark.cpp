@@ -6,6 +6,7 @@
 #include <functional>
 #include <pthread.h>
 #include <thread>
+#include <iostream>
 #include <x86intrin.h>
 
 #include "vulcan/lock_free_spsc_queue.hpp"
@@ -44,11 +45,13 @@ void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
     populate_stack_buffer(queue_orders);
     size_t local_current_tail = 0;
     size_t local_current_head_cached = 0;
+    size_t batch_count = 0;
     
     while (!m_start_ref.load(std::memory_order_acquire)) {
         _mm_pause();
     }
-
+    
+    warm_up_producer(lock_free_queue_ref, queue_orders);
     _mm_lfence();
     start_tsc = _rdtsc();
     for (size_t i = 0; i < TOTAL_OPS; ++i) {
@@ -60,41 +63,62 @@ void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
         while (!lock_free_queue_ref.push_order_into_queue(queue_orders[buffer_index])) {
             _mm_pause();
         }
-        local_current_tail = (local_current_tail + 1) & 255;
-        raw_cycle_counts_array[i] = (end_tsc - start_tsc) - measurement_overhead;
+        local_current_tail = next_local_tail;
+        batch_count ++;
+        if ((batch_count & 7) == 0) {
+            lock_free_queue_ref.mProducer.tail.store(local_current_tail, std::memory_order_release);
+        }
+        //local_current_tail = (local_current_tail + 1) & 255;
     }
-    end_tsc = _rdtsc();
     _mm_lfence();
+    end_tsc = _rdtsc();
     auto producer_hot_path_burst_total_time_taken = end_tsc - start_tsc;
+    auto timer_tax_adjusted_total_cycles = producer_hot_path_burst_total_time_taken - measurement_overhead;
+    auto cycles_per_element = timer_tax_adjusted_total_cycles / 100000000;
+    std::cout  << "The cycles per element in producer benchmark is: " << cycles_per_element << " \n";
     return;
 }
 
 void benchmark_consumer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref, std::atomic<bool>& m_start_ref) { // this thread acts purely as the Matching Engine or Reflector 
     pinThreadToCore(pthread_self(), 2);
     uint64_t start_tsc, end_tsc;
-    size_t head_idx = 0; // tracks head location of Queue_FWD for reading the incoming orders
+    size_t local_head_idx = 0; // tracks head location of Queue_FWD for reading the incoming orders
+    size_t batch_count = 0;
     volatile double local_register_accumulator = 0.0;
     
     while (!m_start_ref.load(std::memory_order_acquire)) {
         _mm_pause();
     }
     
+    warm_up_consumer(lock_free_queue_ref);
     _mm_lfence();
     start_tsc = _rdtsc();
     for (size_t i = 0; i < TOTAL_OPS; ++i) {
-        const QueueOrder* current_head_index_ptr = lock_free_queue_ref.peek_into_queue(head_idx);
+        const QueueOrder* current_head_index_ptr = lock_free_queue_ref.peek_into_queue(local_head_idx);
         while (!current_head_index_ptr) {
             _mm_pause();
-            current_head_index_ptr = lock_free_queue_ref.peek_into_queue(head_idx);
+            //current_head_index_ptr = lock_free_queue_ref.peek_into_queue(local_head_idx);
         }
         local_register_accumulator += current_head_index_ptr->price;
-        lock_free_queue_ref.commit_pop_order_from_queue(current_head_index_ptr, head_idx);
-        head_idx = (head_idx + 1) & 255;
+        lock_free_queue_ref.commit_pop_order_from_queue(current_head_index_ptr, local_head_idx);
+        local_head_idx = (local_head_idx + 1) & 255;
+        batch_count ++;
+        if ((batch_count & 7) == 0) {
+            lock_free_queue_ref.mConsumer.head.store(local_head_idx, std::memory_order_release);
+        }
     }
     _mm_lfence();
     end_tsc = _rdtsc();
+    auto consumer_hot_path_burst_total_time_taken = end_tsc - start_tsc;
+    auto timer_tax_adjusted_total_cycles = consumer_hot_path_burst_total_time_taken - measurement_overhead;
+    auto cycles_per_element = timer_tax_adjusted_total_cycles / 100000000;
+    std::cout  << "The cycles per element in consumer benchmark is: " << cycles_per_element << " \n";
     return;
 }
+
+// void calculate_performance_metrics() {
+//     auto timer_tax_adjusted_total_cycles_for_producer = benchmark_producer(int &lock_free_queue_ref, std::atomic<bool> &m_start_ref)
+// }
 
 int main() {
     auto* my_Lock_Free_Queue = LockFreeSPSCQueue<QueueOrder, 256>::create();
