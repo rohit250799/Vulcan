@@ -40,9 +40,9 @@ void push_orders_to_queue(LockFreeSPSCQueue<QueueOrder, 256>& queue, std::atomic
     unsigned int eax, ebx, ecx, edx;
     __cpuid(0, eax, ebx, ecx, edx);
     
+    const int TOTAL_BURST_ORDERS = 100000000;
     unsigned long long start_time = __rdtsc();
     
-    const int TOTAL_BURST_ORDERS = 100000000;
     for (size_t i = 0; i < TOTAL_BURST_ORDERS; ++i) {
         size_t next_loaal_tail = (local_current_tail + 1) & 255;
         if (next_loaal_tail == local_current_head_cached) {

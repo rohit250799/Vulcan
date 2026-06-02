@@ -164,15 +164,32 @@ benchmark-link: benchmark
 # ============================================================================
 
 analyze_benchmark_performance: benchmark
+	@echo "=== Initializing Telemetry Directory ==="
 	@mkdir -p $(BENCHMARK_RESULTS_DIR)
-	@echo "=== Hardware Performance Counters (Single Pass) ==="
+
+	@echo "=== Executing Unified PMC Read ==="
+
 	sudo perf stat -x, \
-		-e cycles,instructions,cache-references,cache-misses \
-		-e L1-dcache-load-misses,dTLB-load-misses,branch-misses \
-		-o $(BENCHMARK_RESULTS_DIR)/stats_$(CONFIG).csv \
+		-e cycles,\
+instructions,\
+branches,\
+branch-misses,\
+cache-references,\
+cache-misses,\
+L1-dcache-loads,\
+L1-dcache-load-misses,\
+dTLB-loads,\
+dTLB-load-misses,\
+stalled-cycles-frontend,\
+stalled-cycles-backend,\
+context-switches,\
+cpu-migrations,\
+page-faults \
+		-o $(BENCHMARK_RESULTS_DIR)/unified_stats_$(CONFIG).csv \
 		$(BENCHMARK_TARGET)
-	@echo ""
-	@column -s, -t < $(BENCHMARK_RESULTS_DIR)/stats_$(CONFIG).csv
+
+	@echo "=== Performance Ledger Generated ==="
+	@column -s, -t < $(BENCHMARK_RESULTS_DIR)/unified_stats_$(CONFIG).csv
 
 check_benchmark_latency: benchmark
 	@mkdir -p $(BENCHMARK_RESULTS_DIR)
