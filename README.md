@@ -66,59 +66,59 @@ Current problems:
 All commands that Vulcan supports currently:
 
 Command	Description	Optimizations	Debug Symbols   (Build commands)
-make or make all	Default release build	✅ Full -O3	❌ Stripped
-make release	Explicit release build	✅ Full -O3	❌ Stripped
-make debug	Debug build (no optimizations)	❌ -O0	✅ Full -g3
-make benchmark-config	Benchmark build (optimized + symbols)	✅ -O3	✅ Minimal -g
-make program	Build only main program (release)	✅	❌
-make library	Build static library only	Depends on config	Depends on config
-make directories	Create build directories only	N/A	N/A
+1. make or make all	Default release build	✅ Full -O3	❌ Stripped
+2. make release	Explicit release build	✅ Full -O3	❌ Stripped
+3. make debug	Debug build (no optimizations)	❌ -O0	✅ Full -g3
+4. make benchmark-config	Benchmark build (optimized + symbols)	✅ -O3	✅ Minimal -g
+5. make program	Build only main program (release)	✅	❌
+6. make library	Build static library only	Depends on config	Depends on config
+7. make directories	Create build directories only	N/A	N/A
 
 Utility Commands
-Command	Description
-make info	Show current configuration and available targets
-make benchmark-link	Create convenience symlink ./benchmark
+Command	(Description)
+1. make info	(Show current configuration and available targets)
+2. make benchmark-link	(Create convenience symlink ./benchmark)
 
 Clean Commands
-Command	Description
-make clean	Clean everything (all builds, benchmarks, symlinks)
-make clean-release	Clean only release build
-make clean-debug	Clean only debug build
-make clean-benchmark	Clean benchmark results only
-make clean-all	Same as clean
+Command	(Description)
+1. make clean	(Clean everything (all builds, benchmarks, symlinks))
+2. make clean-release	(Clean only release build)
+3. make clean-debug	(Clean only debug build)
+4. make clean-benchmark	(Clean benchmark results only)
+5. make clean-all	(Same as clean)
 
 Test Commands
-Command	Description
-make tests	Build test runner
-make run_tests	Build and run tests
+Command	(Description)
+1. make tests	(Build test runner)
+2. make run_tests	(Build and run tests)
 
 Debug Commands
 Command	Description	Binary
-make find_benchmark_error	GDB backtrace on benchmark	Benchmark (current config)
-make find_error	GDB backtrace on main program	vulcan
-make machine	Disassemble main.o	Object file
+1. make find_benchmark_error	(GDB backtrace on benchmark	Benchmark (current config))
+2. make find_error	(GDB backtrace on main program	vulcan)
+3. make machine	(Disassemble main.o	Object file)
 
 Performance Analysis Commands
 Command	Description	Target Binary
-make analyze_benchmark_performance	Full perf analysis (cache, CPU, memory)	Benchmark
-make check_benchmark_latency	Latency and cache-coherence analysis	Benchmark
-make analyze_performance	Full perf analysis	Main program (vulcan)
-make analyze_test_performance	Perf analysis	Test runner
-make check_latency	Latency analysis	Main program
-make debug-analyze	Perf analysis on debug benchmark	Debug benchmark
+1. make analyze_benchmark_performance	(Full perf analysis (cache, CPU, memory)	Benchmark)
+2. make check_benchmark_latency	(Latency and cache-coherence analysis	Benchmark)
+3. make analyze_performance	(Full perf analysis	Main program (vulcan))
+4. make analyze_test_performance	(Perf analysis	Test runner)
+5. make check_latency	(Latency analysis	Main program)
+6. make debug-analyze	(Perf analysis on debug benchmark	Debug benchmark)
 
 Run Commands
 Command	Description	Binary Used
-make run	Run main production binary	bin/release/vulcan
-make run_benchmark	Run benchmark (release default)	benchmarks/bin/release/benchmark
-make debug-run	Run debug benchmark	benchmarks/bin/debug/benchmark
-make release-run	Run release benchmark	benchmarks/bin/release/benchmark
-make benchmark-run	Run benchmark-config build	benchmarks/bin/benchmark/benchmark
+1. make run	Run main production binary	bin/release/vulcan
+2. make run_benchmark	Run benchmark (release default)	benchmarks/bin/release/benchmark
+3. make debug-run	Run debug benchmark	benchmarks/bin/debug/benchmark
+4. make release-run	Run release benchmark	benchmarks/bin/release/benchmark
+5. make benchmark-run	Run benchmark-config build	benchmarks/bin/benchmark/benchmark
 
 Benchmark-Specific Build Commands
 Command	Description	Config Used
-make benchmark	Build benchmark (release default)	release
-make debug-benchmark	Build benchmark with debug symbols	debug
-make release-benchmark	Build benchmark with optimizations (no symbols)	release
-make benchmark-config	Build benchmark optimized + symbols for perf	benchmark
-make benchmark-link	Create ./benchmark symlink to current config binary	Current
+1. make benchmark	Build benchmark (release default)	release
+2. make debug-benchmark	Build benchmark with debug symbols	debug
+3. make release-benchmark	Build benchmark with optimizations (no symbols)	release
+4. make benchmark-config	Build benchmark optimized + symbols for perf	benchmark
+5. make benchmark-link	Create ./benchmark symlink to current config binary	Current
