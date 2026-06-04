@@ -43,9 +43,9 @@ void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
     pinThreadToCore(pthread_self(), 0);
     alignas(64) std::array<QueueOrder, 1024> queue_orders;
     populate_stack_buffer(queue_orders);
-    size_t local_current_tail = 0;
-    size_t local_current_head_cached = 0;
-    size_t batch_count = 0;
+    uint64_t local_current_tail = 0;
+    uint64_t local_current_head_cached = 0;
+    uint64_t batch_count = 0;
     
     while (!m_start_ref.load(std::memory_order_acquire)) {
         _mm_pause();
@@ -55,22 +55,22 @@ void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
     _mm_lfence();
     start_tsc = _rdtsc();
     for (size_t i = 0; i < TOTAL_OPS; ++i) {
-        size_t next_local_tail = (local_current_tail + 1) & 255;
+        uint64_t next_local_tail = (local_current_tail + 1) & 255;
         if (next_local_tail == local_current_head_cached) {
-            local_current_head_cached = lock_free_queue_ref.load_head_acquire();
-        }
+            while (next_local_tail == local_current_head_cached) {
+                _mm_pause();
+                local_current_head_cached = lock_free_queue_ref.load_head_acquire();
+            }
+        } // space is there now to push new QueueOrder
         size_t buffer_index = local_current_tail & 1023;
-        while (!lock_free_queue_ref.push_order_into_queue(queue_orders[buffer_index])) {
-            _mm_pause();
-        }
+        lock_free_queue_ref.producer_uncommitted_push(queue_orders[buffer_index], local_current_tail);
         local_current_tail = next_local_tail;
         batch_count ++;
         if ((batch_count & 7) == 0) {
             lock_free_queue_ref.publish_tail_release(local_current_tail);
-            //lock_free_queue_ref.mProducer.tail.store(local_current_tail, std::memory_order_release);
         }
-        //local_current_tail = (local_current_tail + 1) & 255;
     }
+    lock_free_queue_ref.publish_tail_release(local_current_tail);
     _mm_lfence();
     end_tsc = _rdtsc();
     auto producer_hot_path_burst_total_time_taken = end_tsc - start_tsc;
@@ -83,7 +83,8 @@ void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
 void benchmark_consumer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref, std::atomic<bool>& m_start_ref) { // this thread acts purely as the Matching Engine or Reflector 
     pinThreadToCore(pthread_self(), 2);
     uint64_t start_tsc, end_tsc;
-    size_t local_head_idx = 0; // tracks head location of Queue_FWD for reading the incoming orders
+    uint64_t local_head_idx = 0; // tracks head location of Queue_FWD for reading the incoming orders
+    uint64_t local_tail_cached = 0;
     size_t batch_count = 0;
     volatile double local_register_accumulator = 0.0;
     
@@ -95,20 +96,21 @@ void benchmark_consumer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
     _mm_lfence();
     start_tsc = _rdtsc();
     for (size_t i = 0; i < TOTAL_OPS; ++i) {
-        const QueueOrder* current_head_index_ptr = lock_free_queue_ref.peek_into_queue(local_head_idx);
-        while (!current_head_index_ptr) {
-            _mm_pause();
-            current_head_index_ptr = lock_free_queue_ref.peek_into_queue(local_head_idx);
+        if (local_head_idx == local_tail_cached) {
+            while (local_head_idx == local_tail_cached) {
+                _mm_pause();
+                local_tail_cached = lock_free_queue_ref.load_tail_acquire();
+            }
         }
+        const QueueOrder* current_head_index_ptr = lock_free_queue_ref.consumer_uncommitted_peek(local_head_idx);
         local_register_accumulator += current_head_index_ptr->price;
-        lock_free_queue_ref.commit_pop_order_from_queue(current_head_index_ptr, local_head_idx);
         local_head_idx = (local_head_idx + 1) & 255;
         batch_count ++;
         if ((batch_count & 7) == 0) {
-            //lock_free_queue_ref.mConsumer.head.store(local_head_idx, std::memory_order_release);
             lock_free_queue_ref.publish_head_release(local_head_idx);
         }
     }
+    lock_free_queue_ref.publish_head_release(local_head_idx);
     _mm_lfence();
     end_tsc = _rdtsc();
     auto consumer_hot_path_burst_total_time_taken = end_tsc - start_tsc;
