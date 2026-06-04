@@ -1,5 +1,3 @@
-#include <algorithm>
-#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstddef>
@@ -8,15 +6,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <emmintrin.h>
-#include <exception>
 #include <fstream>
 #include <string>
 #include <sys/mman.h>
 #include <iostream>
-#include <iterator>
-#include <limits>
 #include <new>
-#include <stdatomic.h>
 #include <smmintrin.h>
 #include <type_traits>
 #include <xmmintrin.h>
@@ -52,8 +46,8 @@ class LockFreeSPSCQueue {
     LockFreeSPSCQueue& operator=(LockFreeSPSCQueue&& other) noexcept = delete;
     inline size_t load_head_acquire() noexcept;
     inline size_t load_tail_acquire() noexcept;
-    void producer_uncommitted_push(QueueOrder& qOrder, size_t current_local_tail);
-    void* consumer_uncommitted_peek(size_t consumer_local_head);
+    void producer_uncommitted_push(QueueOrder& qOrder, size_t current_local_tail) noexcept;
+    const QueueOrder* consumer_uncommitted_peek(size_t consumer_local_head) noexcept;
     inline void publish_tail_release(size_t new_local_tail);
     inline void publish_head_release(size_t new_local_head);
     bool push_order_into_queue(const QueueOrder& qOrder);
@@ -85,16 +79,19 @@ size_t LockFreeSPSCQueue<T, capacity>::load_tail_acquire() noexcept {
 }
 
 template<typename T, size_t capacity>
-void LockFreeSPSCQueue<T, capacity>::producer_uncommitted_push(QueueOrder& qOrder, size_t current_local_tail) {
-    auto buffer_address = reinterpret_cast<std::byte*>((this) + 128 + (current_local_tail & 255) * 64);
+void LockFreeSPSCQueue<T, capacity>::producer_uncommitted_push(QueueOrder& qOrder, size_t current_local_tail) noexcept {
+    reinterpret_cast<std::byte*>(this);
+    auto buffer_address = this + 128 + (current_local_tail & (capacity - 1) << 6);
+    QueueOrder* casted_buffer_address = reinterpret_cast<QueueOrder*>(buffer_address);
     new (reinterpret_cast<void*>(buffer_address)) QueueOrder(qOrder);
     return;
 }
 
 template<typename T, size_t capacity>
-void* consumer_uncommitted_peek(size_t consumer_local_head) {
-    void* memory_address = reinterpret_cast<void*>(consumer_local_head);
-    return memory_address;
+const QueueOrder* LockFreeSPSCQueue<T, capacity>::consumer_uncommitted_peek(size_t consumer_local_head) noexcept {
+    auto wrapped_memory_address = consumer_local_head & (capacity - 1);
+    const QueueOrder* physical_memory_address_offset = reinterpret_cast<QueueOrder*>((this) + 128 + (consumer_local_head & 255) * 64);
+    return physical_memory_address_offset;
 }
 
 template<typename T, size_t capacity>
