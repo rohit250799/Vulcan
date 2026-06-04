@@ -30,7 +30,7 @@ in **/etc/default/grub** file, updating the GRUB bootloader and then rebooting.
 
 Splitting the monolithic pop function and implementing the **Pinning Pattern** by splitting the operation into 2 phases: **Access** and **Release**
 
-For performance optimization, pinning producer and consumer threads to **Cores 0 and 2** respectively and **Turning Off Core 1** by running the environment hardening script from terminal.
+For performance optimization, pinning producer and consumer threads to **Cores 0 and 2** respectively and **Turning Off CPU 1 (offline)** by running the environment hardening script from terminal.
 ![Turning off core 1](screenshots/cpu_1_offline.png)
 
 Using **native_handle()** for **Thread Management with CPU Affinity** (Pinning a thread to a specific CPU core). Hardware Architecture varies drastically between different OS and require native_handle() to bypass the 
@@ -39,9 +39,6 @@ we need to use the native handle of the OS.
 
 Current overhead:
 ![Current overhead](screenshots/current_overhead.png)
-
-How the current benchmark measurement is working:
-
 
 Current problems:
 1. My AMD Zen 3 has L1 Data Cache per core of 32 kb. So, if I create the SPSC Queue with 1024 capacity, so the memory needed to store the QueueOrders = 1024 * 64 = 64 kb, which is more than L1 cache capacity. So, reducing the capacity to 256 since now the memory required = 16 kb and the assertion that capacity should be a power of 2 is also satisfied. (Solved)
@@ -52,8 +49,8 @@ Current problems:
    Ubuntu system runs, user-space processes and kernel administrative tasks scatter 4KB allocations across the DRAM, leaving no 2MB gaps of contiguous space. (solved)
 5. A single pop function to pop Orders from Queue is proving to be a Latency trap. Because in such a case of returning the **const pointer** - the function execution ends, but I am still yet to update the head. If I update the index before the consumer has finished processing the order, it would lead to a **Write After Read** hazard where the Producer core (potentially on another physical core in the same CCD) sees the vacant slot, overwrites it and corrupts the data while the Consumer thread is still reading the price. 
 
-Current benchmark performance:
-![Current benchmark performance](screenshots/benchmark_performance.png)
+Current benchmark performance: The number of **Cycles per element in Producer and Consumer threads** = **17**
+![Current benchmark performance](screenshots/cycles_per_element.png)
 
 All commands that Vulcan supports currently:
 
@@ -114,3 +111,7 @@ Command	                        Description	                                    
 3. **make release-benchmark**	Build benchmark with optimizations (no symbols)	         release
 4. **make benchmark-config**	Build benchmark optimized + symbols for perf	            benchmark
 5. **make benchmark-link**	   Create ./benchmark symlink to current config binary	   Current
+
+Some **Latency report snippets** from the Lock-free SPSC Queue (entire report will be uploaded asap after some further optimizations):
+![Latency report snippet 1](screenshots/latency_report_snippet_1.png)
+![Latency report snippet 2](screenshots/latency_report_snippet_2.png)
