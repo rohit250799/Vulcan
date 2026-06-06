@@ -17,7 +17,6 @@ constexpr size_t TOTAL_OPS = 100000000;
 
 size_t build_telemetry_scaffold() {
     uint64_t start_cycles, end_cycles, measurement_overhead;
-    
     for (size_t i = 0; i < 100000000; ++i) {
         raw_cycle_counts_array[i] = 0;
     }
@@ -75,7 +74,7 @@ void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
     end_tsc = _rdtsc();
     auto producer_hot_path_burst_total_time_taken = end_tsc - start_tsc;
     auto timer_tax_adjusted_total_cycles = producer_hot_path_burst_total_time_taken - measurement_overhead;
-    auto cycles_per_element = timer_tax_adjusted_total_cycles / 100000000;
+    auto cycles_per_element = timer_tax_adjusted_total_cycles / TOTAL_OPS;
     std::cout  << "The cycles per element in producer benchmark is: " << cycles_per_element << " \n";
     return;
 }
@@ -83,10 +82,11 @@ void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
 void benchmark_consumer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref, std::atomic<bool>& m_start_ref) { // this thread acts purely as the Matching Engine or Reflector 
     pinThreadToCore(pthread_self(), 2);
     uint64_t start_tsc, end_tsc;
-    uint64_t local_head_idx = 0; // tracks head location of Queue_FWD for reading the incoming orders
+    uint64_t local_head_idx = 0; // tracks head location of queue for reading the incoming orders
     uint64_t local_tail_cached = 0;
     size_t batch_count = 0;
-    volatile double local_register_accumulator = 0.0;
+    double local_register_accumulator_0, local_register_accumulator_1, local_register_accumulator_2, local_register_accumulator_3, \
+    local_register_accumulator_4, local_register_accumulator_5, local_register_accumulator_6, local_register_accumulator_7 = 0.0;    
     
     while (!m_start_ref.load(std::memory_order_acquire)) {
         _mm_pause();
@@ -95,16 +95,33 @@ void benchmark_consumer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
     warm_up_consumer(lock_free_queue_ref);
     _mm_lfence();
     start_tsc = _rdtsc();
-    for (size_t i = 0; i < TOTAL_OPS; ++i) {
+    for (size_t i = 0; i < TOTAL_OPS; i+=8) {
         if (local_head_idx == local_tail_cached) {
             while (local_head_idx == local_tail_cached) {
                 _mm_pause();
                 local_tail_cached = lock_free_queue_ref.load_tail_acquire();
             }
         }
-        const QueueOrder* current_head_index_ptr = lock_free_queue_ref.consumer_uncommitted_peek(local_head_idx);
-        local_register_accumulator += current_head_index_ptr->price;
-        local_head_idx = (local_head_idx + 1) & 255;
+        const QueueOrder* current_head_index_ptr_0 = lock_free_queue_ref.consumer_uncommitted_peek(local_head_idx);
+        const QueueOrder* current_head_index_ptr_1 = lock_free_queue_ref.consumer_uncommitted_peek(local_head_idx + 1);
+        const QueueOrder* current_head_index_ptr_2 = lock_free_queue_ref.consumer_uncommitted_peek(local_head_idx + 2);
+        const QueueOrder* current_head_index_ptr_3 = lock_free_queue_ref.consumer_uncommitted_peek(local_head_idx + 3);
+        const QueueOrder* current_head_index_ptr_4 = lock_free_queue_ref.consumer_uncommitted_peek(local_head_idx + 4);
+        const QueueOrder* current_head_index_ptr_5 = lock_free_queue_ref.consumer_uncommitted_peek(local_head_idx + 5);
+        const QueueOrder* current_head_index_ptr_6 = lock_free_queue_ref.consumer_uncommitted_peek(local_head_idx + 6);
+        const QueueOrder* current_head_index_ptr_7 = lock_free_queue_ref.consumer_uncommitted_peek(local_head_idx + 7);
+        
+        
+        local_register_accumulator_0 += current_head_index_ptr_0->price;
+        local_register_accumulator_1 += current_head_index_ptr_1->price;
+        local_register_accumulator_2 += current_head_index_ptr_2->price;
+        local_register_accumulator_3 += current_head_index_ptr_3->price;
+        local_register_accumulator_4 += current_head_index_ptr_4->price;
+        local_register_accumulator_5 += current_head_index_ptr_5->price;
+        local_register_accumulator_6 += current_head_index_ptr_6->price;
+        local_register_accumulator_7 += current_head_index_ptr_7->price;        
+        
+        local_head_idx = (local_head_idx + 8) & 255;
         batch_count ++;
         if ((batch_count & 7) == 0) {
             lock_free_queue_ref.publish_head_release(local_head_idx);
