@@ -14,6 +14,7 @@
 #include <smmintrin.h>
 #include <type_traits>
 #include <xmmintrin.h>
+#include <numaif.h>
 
 struct alignas(64) QueueOrder {
     uint64_t order_id;
@@ -80,16 +81,14 @@ size_t LockFreeSPSCQueue<T, capacity>::load_tail_acquire() noexcept {
 
 template<typename T, size_t capacity>
 void LockFreeSPSCQueue<T, capacity>::producer_uncommitted_push(QueueOrder& qOrder, size_t current_local_tail) noexcept {
-    reinterpret_cast<std::byte*>(this);
     auto buffer_address = this + 128 + (current_local_tail & (capacity - 1) << 6);
     QueueOrder* casted_buffer_address = reinterpret_cast<QueueOrder*>(buffer_address);
-    new (reinterpret_cast<void*>(buffer_address)) QueueOrder(qOrder);
+    new (reinterpret_cast<void*>(casted_buffer_address)) QueueOrder(qOrder);
     return;
 }
 
 template<typename T, size_t capacity>
 const QueueOrder* LockFreeSPSCQueue<T, capacity>::consumer_uncommitted_peek(size_t consumer_local_head) noexcept {
-    auto wrapped_memory_address = consumer_local_head & (capacity - 1);
     const QueueOrder* physical_memory_address_offset = reinterpret_cast<QueueOrder*>((this) + 128 + (consumer_local_head & 255) * 64);
     return physical_memory_address_offset;
 }
@@ -142,6 +141,13 @@ LockFreeSPSCQueue<T, capacity>* LockFreeSPSCQueue<T, capacity>::create() {
     auto* mem_ptr = mmap(NULL, rounded_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0);
     if (mem_ptr == MAP_FAILED) {
         perror("mmap");
+        std::exit(EXIT_FAILURE);
+    }
+    unsigned long nodemask = 1;
+    unsigned long maxnode = 2;
+    int mbind_policy_result = mbind(mem_ptr, boundary, MPOL_BIND, &nodemask, maxnode, MPOL_MF_STRICT);
+    if (mbind_policy_result == -1) {
+        perror("mbind");
         std::exit(EXIT_FAILURE);
     }
     LockFreeSPSCQueue* obj = new (mem_ptr) LockFreeSPSCQueue();
