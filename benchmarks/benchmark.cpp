@@ -13,10 +13,11 @@
 #include "vulcan/queue_core.hpp"
 
 std::array<uint64_t, 100000000> raw_cycle_counts_array;
-constexpr size_t TOTAL_OPS = 100000000;
+constexpr size_t TOTAL_OPS = 1000000000;
 
 size_t build_telemetry_scaffold() {
-    uint64_t start_cycles, end_cycles, measurement_overhead;
+    uint64_t start_cycles, end_cycles; 
+    uint64_t measurement_overhead = 1;
     for (size_t i = 0; i < 100000000; ++i) {
         raw_cycle_counts_array[i] = 0;
     }
@@ -40,7 +41,7 @@ const size_t measurement_overhead = build_telemetry_scaffold();
 void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref, std::atomic<bool>& m_start_ref) { // this thread acts as a Order Generator and the Timekeeper
     uint64_t start_tsc, end_tsc;
     pinThreadToCore(pthread_self(), 0);
-    alignas(64) std::array<QueueOrder, 1024> queue_orders;
+    alignas(64) std::array<QueueOrder, 8> queue_orders;
     populate_stack_buffer(queue_orders);
     uint64_t local_current_tail = 0;
     uint64_t local_current_head_cached = 0;
@@ -61,13 +62,14 @@ void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
                 local_current_head_cached = lock_free_queue_ref.load_head_acquire();
             }
         } // space is there now to push new QueueOrder
-        size_t buffer_index = local_current_tail & 1023;
+        //size_t buffer_index = local_current_tail & 1023;
+        size_t buffer_index = local_current_tail & 7;
         lock_free_queue_ref.producer_uncommitted_push(queue_orders[buffer_index], local_current_tail);
         local_current_tail = next_local_tail;
         batch_count ++;
         if ((batch_count & 7) == 0) {
             lock_free_queue_ref.publish_tail_release(local_current_tail);
-        }
+        }        
     }
     lock_free_queue_ref.publish_tail_release(local_current_tail);
     _mm_lfence();
@@ -75,7 +77,7 @@ void benchmark_producer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
     auto producer_hot_path_burst_total_time_taken = end_tsc - start_tsc;
     auto timer_tax_adjusted_total_cycles = producer_hot_path_burst_total_time_taken - measurement_overhead;
     auto cycles_per_element = timer_tax_adjusted_total_cycles / TOTAL_OPS;
-    std::cout  << "The cycles per element in producer benchmark is: " << cycles_per_element << " \n";
+    std::cout << "The cycles per element in producer benchmark is: " << cycles_per_element << " \n";
     return;
 }
 
@@ -128,12 +130,14 @@ void benchmark_consumer(LockFreeSPSCQueue<QueueOrder, 256>& lock_free_queue_ref,
         }
     }
     lock_free_queue_ref.publish_head_release(local_head_idx);
+    auto total_accumulator_sum = ((local_register_accumulator_0 + local_register_accumulator_1) + (local_register_accumulator_2 + local_register_accumulator_3) + \
+        (local_register_accumulator_4 + local_register_accumulator_5) + (local_register_accumulator_6 + local_register_accumulator_7)); 
     _mm_lfence();
     end_tsc = _rdtsc();
     auto consumer_hot_path_burst_total_time_taken = end_tsc - start_tsc;
     auto timer_tax_adjusted_total_cycles = consumer_hot_path_burst_total_time_taken - measurement_overhead;
-    auto cycles_per_element = timer_tax_adjusted_total_cycles / 100000000;
-    std::cout  << "The cycles per element in consumer benchmark is: " << cycles_per_element << " \n";
+    auto cycles_per_element = timer_tax_adjusted_total_cycles / TOTAL_OPS;
+    std::cout << "The cycles per element in consumer benchmark is: " << cycles_per_element << " \n";
     return;
 }
 
@@ -148,6 +152,6 @@ int main() {
     m_start.store(true, std::memory_order_release);
     
     producer_benchmark_thread.join();
-    consumer_benchmark_thread.join();
+    consumer_benchmark_thread.join();    
 }
 
