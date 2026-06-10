@@ -8,7 +8,7 @@ CXX = g++
 # ============================================================================
 # Configuration Selection
 # ============================================================================
-# Usage: 
+# Usage:
 #   make config=release (default) - production build with optimizations
 #   make config=debug              - debug build with symbols, no optimizations
 #   make config=benchmark          - optimized but with minimal debug info for perf
@@ -22,7 +22,7 @@ CONFIG ?= release
 
 # Base flags (common to all)
 BASE_CXXFLAGS = -std=c++20 -Iinclude -Wall -Wextra -Wpedantic -pthread
-BASE_LDFLAGS = -lpthread
+BASE_LDFLAGS = -lpthread -lnuma
 
 # Release configuration (production - maximum performance)
 ifeq ($(CONFIG),release)
@@ -43,7 +43,8 @@ endif
 
 # Benchmark configuration (optimized but with debug symbols for perf)
 ifeq ($(CONFIG),benchmark)
-    CXXFLAGS = $(BASE_CXXFLAGS) -O3 -mcx16 -march=znver3 -DNDEBUG -g -fno-omit-frame-pointer
+#    CXXFLAGS = $(BASE_CXXFLAGS) -O3 -mcx16 -march=znver3 -DNDEBUG -g -fno-omit-frame-pointer
+    CXXFLAGS = $(BASE_CXXFLAGS) -O3 -mcx16 -march=native -DNDEBUG -g -fno-omit-frame-pointer
     LDFLAGS = $(BASE_LDFLAGS)
     BUILD_SUFFIX = benchmark
     STRIP_SYMBOLS = no

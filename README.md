@@ -7,13 +7,11 @@ deterministic pipeline. On completion, Vulcan will do 4 specific tasks:
 3. **Risk Checking**: Validating that a trade won't bankrupt the firm in under 100 nanoseconds.
 4. **Order Entry**: Formatting a "Buy" or "Sell" instruction into a binary protocol (like FIX/SBE) and blasting it back to the exchange.
 
-All commands to test the Engine from the terminal have been provided below. 
-
-To find the error using a degugger manually in the main binary executable, use these commands and maintain the ordering:
-1. **make clean**
-2. **make find_error**
-3. **run** - if successfully entered the GDB Shell
-4. **backtrace**
+**Performance Highlights for the benchmark**
+1. **Stalled cycles per instruction** = 0.00
+2. **Cycles per element in Consumer thread** = 3
+3. **Cycles per element in Producer thread** = 4
+4. **Frontend cycles idle** = 0.20
 
 Current performance analysis:
 ![Current performance analysis](screenshots/current_performance_analysis.png)
@@ -37,80 +35,128 @@ Using **native_handle()** for **Thread Management with CPU Affinity** (Pinning a
 C++ abstraction and speak directly to the OS Kernel. So, to pin a thread  - we must pass the OS specific thread identifier directly to the Kernel API's and since (Windows and Linux) handle CPU scheduling differently,
 we need to use the native handle of the OS.
 
+Benchmarking:
+For measuring benchmarks performance, building a separate benchmark executable with different Makefile command. For the benchmark, creating 2 threads: Producer and consumer (pinned to different cores) which are supposed to run for 100M times. Producer
+pushes QueueOrder instances to the SPSC Queue and the consumer thread pops it. Storing 8 instances of QueueOrders in a array on the stack and using the Producer thread to take instance from it and push to the queue. Instances capacity is chosen as 8 such that the total space needed = 8 * 64 bytes and it can sit comfortably sit inside the L1-D cache of my processor, avoiding the overflow problem. 
+
+Upon creation of the Producer thread, its first pinned to a particular core and it waits for until m_start turns true. An array of 8 QueueOrders is then allocated on the stack to hold instances which will then be pushed to the queue. Then finally when m_start turns True, the Queue is warmed up in Producer thread using 1M push operations and a memory fence is established. The thread finally enters the hot path and starts pushing QueueOrder instances into the queue. It will be in a spin-wait for as long as the Queue is full and only push 8 instances when there is space to do so together. For the Push operation, there is no allocation involved (using Placement new to create the instance directly inside the pre-allocated memory buffer). Replacing the normal single release of atomic tail after every successful push with batched release of 8. After 1B iterations, producer thread exits the hot loop, memory fence is closed and the cycles per element in tbe Producer thread is calculated.  
+
+Same like Producer thread, the Consumer thread is first pinned to a core and then waits for m_start to turn true. When it turns True, its warmed up first with 1M burst. A memory fence is established and it enters the hot loop for 1B iterations.   The Consumer thread will also be in a spin-wait for as long as the Queue is empty and only start with the pop operation when 8 instances are present in the queue. When the condition is satisfied, it takes a peek at it and gets the memory address of the 8 QueueOrder instance which are to be popped. To avoid compiler optimizaton, from the pointer to the QueueOrder instance obtained, it accesses the price field and adds it to the local register accumulators (to make it seem like we are doing something with the pointer) and this is done for every single iteration. Again like Producer thread, there is a batched release of atomic head when count is 8. After the hot loop exit, Memory fence gets closed and the cycles per element is calculated in Consumer thread.
+
 Current overhead:
 ![Current overhead](screenshots/current_overhead.png)
 
 Current problems:
 1. My AMD Zen 3 has L1 Data Cache per core of 32 kb. So, if I create the SPSC Queue with 1024 capacity, so the memory needed to store the QueueOrders = 1024 * 64 = 64 kb, which is more than L1 cache capacity. So, reducing the capacity to 256 since now the memory required = 16 kb and the assertion that capacity should be a power of 2 is also satisfied. (Solved)
-2. The calling of memset(obj, 0x00, sizeof(*obj)) is a "Cold Path" solution but inefficient. While it warms the physical memory, but doesn't address the Store-To-Load Forwarding conflicts that can occur when transitioning from initializing buffer to high-speed matching loop
+2. The calling of memset(obj, 0x00, sizeof(*obj)) is a "Cold Path" solution but inefficient. While it warms the physical memory, but doesn't address the Store-To-Load Forwarding conflicts that can occur when transitioning from initializing buffer to high-speed matching loop (solved)
 3. Replacing the memset function call in create function with Non-Temporal Store intrinsics (e.g., _mm_stream_si128), but facing a C++ type-safety violation. (solved)
 4. Currently facing Physical Memory Fragmentation (mmap stops working suddenly even when I have a huge page allocated successfully). This problem was resolved the last time I rebooted the system. Issue:
    In the AMD Zen 3 architecture, a 2MB Huge Page is not just a size requirement; it is a contiguity requirement. The MMU requires 512 consecutive 4KB physical page frames to back a single huge page. As my 
    Ubuntu system runs, user-space processes and kernel administrative tasks scatter 4KB allocations across the DRAM, leaving no 2MB gaps of contiguous space. (solved)
-5. A single pop function to pop Orders from Queue is proving to be a Latency trap. Because in such a case of returning the **const pointer** - the function execution ends, but I am still yet to update the head. If I update the index before the consumer has finished processing the order, it would lead to a **Write After Read** hazard where the Producer core (potentially on another physical core in the same CCD) sees the vacant slot, overwrites it and corrupts the data while the Consumer thread is still reading the price. 
+5. A single pop function to pop Orders from Queue is proving to be a Latency trap. Because in such a case of returning the **const pointer** - the function execution ends, but I am still yet to update the head. If I update the index before the consumer has finished processing the order, it would lead to a **Write After Read** hazard where the Producer core (potentially on another physical core in the same CCD) sees the vacant slot, overwrites it and corrupts the data while the Consumer thread is still reading the price. (solved)
+6. Hardware NUMA Pinning - need to use (numactl --membind) as in case of multi-socket architecture, physical memory access costs vary depending on the node and destroy deterministic behaviour
+7. In benchmarks, cycles per element in producer and consumer thread is 17. We need to decrease it further into single-digit numbers. Instructions per cycle = 0.28 (needs to be 1.5+). Branch misses = 1.28% currently, needs to be decreased further (partially solved, now the **cycles per element in both
+   threads is 6**)
+8. About pinning threads to particular cores (pinning producer thread to CPU 0 Core 0 and consumer thread to CPU 2 Core 1), we have to ensure that the CPU's lie on the same Core Chiplet Die (CCD). Since our threads are pinned to CPU 0 and 2 - they always lie on the same CCD in **AMD RYZEN 5000** chips
+   (Solved) - In the 'Zen 3' architecture used for this generation, each CCD contains 8 cores, and the logical-to-physical core mapping assigns Core 0, 1, 2, 3, 4, 5, 6, and 7 sequentially to the first CCD (CCD #0).
+9. For Deterministic Memory binding, I'll have to use mbind which is included in the **numaif.h file** and it needs to be included in the benchmark file. Before that, I'll have to install the dependency on my machine using the command: **sudo apt install libnuma-dev**. Once its installed, then only I can use it in my program. (solved)
 
-Current benchmark performance: The number of **Cycles per element in Producer and Consumer threads** = **17**
-![Current benchmark performance](screenshots/cycles_per_element.png)
+Current benchmark performance: The number of **Cycles per element in Consumer thread** = **3** and **Cycles per element in Producer thread** = **4**
+![Current benchmark performance](screenshots/new_cycles_per_element.png)
 
 All commands that Vulcan supports currently:
+---
 
-Command	Description	Optimizations	Debug Symbols   (Build commands)
-1. **make** or **make all**	Default release build	✅ Full -O3	❌ Stripped
-2. **make release**	Explicit release build	✅ Full -O3	❌ Stripped
-3. **make debug**	Debug build (no optimizations)	❌ -O0	✅ Full -g3
-4. **make benchmark-config**	Benchmark build (optimized + symbols)	✅ -O3	✅ Minimal -g
-5. **make program**	Build only main program (release)	✅	❌
-6. **make library**	Build static library only	Depends on config	Depends on config
-7. **make directories**	Create build directories only	N/A	N/A
+## Build Commands
 
-Utility Commands
-Command	                        (Description)
-1. **make info**	            (Show current configuration and available targets)
-2. **make benchmark-link**	   (Create convenience symlink ./benchmark)
+| Command | Description | Optimizations | Debug Symbols |
+|---------|-------------|---------------|----------------|
+| `make` or `make all` | Default release build | ✅ Full -O3 | ❌ Stripped |
+| `make release` | Explicit release build | ✅ Full -O3 | ❌ Stripped |
+| `make debug` | Debug build (no optimizations) | ❌ -O0 | ✅ Full -g3 |
+| `make benchmark-config` | Benchmark build (optimized + symbols) | ✅ -O3 | ✅ Minimal -g |
+| `make program` | Build only main program (release) | ✅ | ❌ |
+| `make library` | Build static library only | Depends on config | Depends on config |
+| `make directories` | Create build directories only | N/A | N/A |
 
-Clean Commands
-Command	                           (Description)
-1. **make clean**	            (Clean everything (all builds, benchmarks, symlinks))
-2. **make clean-release**	   (Clean only release build)
-3. **make clean-debug**	      (Clean only debug build)
-4. **make clean-benchmark**	(Clean benchmark results only)
-5. **make clean-all**	      (Same as clean)
+---
 
-Test Commands
-Command	                           (Description)
-1. **make tests**	            (Build test runner)
-2. **make run_tests**	      (Build and run tests)
+##  Utility Commands
 
-Debug Commands
-Command	                              Description	                                          Binary
-1. **make find_benchmark_error**	      (GDB backtrace on benchmark	      Benchmark (current config))
-2. **make find_error**	               (GDB backtrace on main program	                     vulcan)
-3. **make machine**	                  (Disassemble main.o	                              Object file)
+| Command | Description |
+|---------|-------------|
+| `make info` | Show current configuration and available targets |
+| `make benchmark-link` | Create convenience symlink `./benchmark` |
 
-Performance Analysis Commands
-Command	                                                      Description	                           Target Binary
-1. **make analyze_benchmark_performance**	               (Full perf analysis (cache, CPU, memory)	      Benchmark)
-2. **make check_benchmark_latency**	                     (Latency and cache-coherence analysis	         Benchmark)
-3. **make analyze_performance**	                        (Full perf analysis	                           Main program (vulcan))
-4. **make analyze_test_performance**	                  (Perf analysis	                                 Test runner)
-5. **make check_latency**	                              (Latency analysis	                              Main program)
-6. **make debug-analyze**	                              (Perf analysis on debug benchmark	            Debug benchmark)
+---
 
-Run Commands
-Command	                     Description	                                               Binary Used
-1. **make run**	         Run main production binary	                                 bin/release/vulcan
-2. **make run_benchmark**	Run benchmark (release default)	                           benchmarks/bin/release/benchmark
-3. **make debug-run**	   Run debug benchmark	                                       benchmarks/bin/debug/benchmark
-4. **make release-run**	   Run release benchmark	                                    benchmarks/bin/release/benchmark
-5. **make benchmark-run**	Run benchmark-config build	                                 benchmarks/bin/benchmark/benchmark
+##  Clean Commands
 
-Benchmark-Specific Build Commands
-Command	                        Description	                                       Config Used
-1. **make benchmark**	      Build benchmark (release default)	                     release
-2. **make debug-benchmark**	Build benchmark with debug symbols	                     debug
-3. **make release-benchmark**	Build benchmark with optimizations (no symbols)	         release
-4. **make benchmark-config**	Build benchmark optimized + symbols for perf	            benchmark
-5. **make benchmark-link**	   Create ./benchmark symlink to current config binary	   Current
+| Command | Description |
+|---------|-------------|
+| `make clean` | Clean everything (all builds, benchmarks, symlinks) |
+| `make clean-release` | Clean only release build |
+| `make clean-debug` | Clean only debug build |
+| `make clean-benchmark` | Clean benchmark results only |
+| `make clean-all` | Same as `clean` |
+
+---
+
+##  Test Commands
+
+| Command | Description |
+|---------|-------------|
+| `make tests` | Build test runner |
+| `make run_tests` | Build and run tests |
+
+---
+
+##  Debug Commands
+
+| Command | Description | Binary |
+|---------|-------------|--------|
+| `make find_benchmark_error` | GDB backtrace on benchmark | Benchmark (current config) |
+| `make find_error` | GDB backtrace on main program | `vulcan` |
+| `make machine` | Disassemble `main.o` | Object file |
+
+---
+
+##  Performance Analysis Commands
+
+| Command | Description | Target Binary |
+|---------|-------------|----------------|
+| `make analyze_benchmark_performance` | Full perf analysis (cache, CPU, memory) | Benchmark |
+| `make check_benchmark_latency` | Latency and cache‑coherence analysis | Benchmark |
+| `make analyze_performance` | Full perf analysis | Main program (`vulcan`) |
+| `make analyze_test_performance` | Perf analysis | Test runner |
+| `make check_latency` | Latency analysis | Main program |
+| `make debug-analyze` | Perf analysis on debug benchmark | Debug benchmark |
+
+---
+
+##  Run Commands
+
+| Command | Description | Binary Used |
+|---------|-------------|--------------|
+| `make run` | Run main production binary | `bin/release/vulcan` |
+| `make run_benchmark` | Run benchmark (release default) | `benchmarks/bin/release/benchmark` |
+| `make debug-run` | Run debug benchmark | `benchmarks/bin/debug/benchmark` |
+| `make release-run` | Run release benchmark | `benchmarks/bin/release/benchmark` |
+| `make benchmark-run` | Run benchmark‑config build | `benchmarks/bin/benchmark/benchmark` |
+
+---
+
+##  Benchmark‑Specific Build Commands
+
+| Command | Description | Config Used |
+|---------|-------------|--------------|
+| `make benchmark` | Build benchmark (release default) | release |
+| `make debug-benchmark` | Build benchmark with debug symbols | debug |
+| `make release-benchmark` | Build benchmark with optimizations (no symbols) | release |
+| `make benchmark-config` | Build benchmark optimized + symbols for perf | benchmark |
+| `make benchmark-link` | Create `./benchmark` symlink to current config binary | Current |
+
+---
 
 Some **Latency report snippets** from the Lock-free SPSC Queue (entire report will be uploaded asap after some further optimizations):
 ![Latency report snippet 1](screenshots/latency_report_snippet_1.png)
