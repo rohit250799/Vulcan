@@ -1,6 +1,6 @@
 # Vulcan
-A Low-Latency Trading Engine (Tick-to-Trade system) built from ground up to run on Linux and specific AMD Ryzen 5600H. It acts as a 
-deterministic pipeline. On completion, Vulcan will do 4 specific tasks:
+A Low-Latency Trading Engine (Tick-to-Trade system) built from ground up to run on Linux and specific AMD Ryzen 5600H. It acts as a deterministic pipeline. 
+On completion, Vulcan will do 4 specific tasks:
 
 1. **Feed Arbitration**: Receiving multiple copies of market data (UDP) and picking the fastest one using Zero-Copy techniques
 2. **LOB (Limit Order Book) Management**: Maintaining a real-time map of every "Buy" and "Sell" order in the market with O(1) complexity
@@ -13,8 +13,8 @@ deterministic pipeline. On completion, Vulcan will do 4 specific tasks:
 3. **Cycles per element in Producer thread** = 4
 4. **Frontend cycles idle** = 0.20
 
-Current performance analysis:
-![Current performance analysis](screenshots/current_performance_analysis.png)
+Current benchmark performance: The number of **Cycles per element in Consumer thread** = **3** and **Cycles per element in Producer thread** = **4**
+![Current benchmark performance](screenshots/new_cycles_per_element.png)
 
 Currently working on:
 1. **Lock-free SPSC circular Queue**
@@ -35,7 +35,7 @@ Using **native_handle()** for **Thread Management with CPU Affinity** (Pinning a
 C++ abstraction and speak directly to the OS Kernel. So, to pin a thread  - we must pass the OS specific thread identifier directly to the Kernel API's and since (Windows and Linux) handle CPU scheduling differently,
 we need to use the native handle of the OS.
 
-Benchmarking:
+**Benchmarking**:
 For measuring benchmarks performance, building a separate benchmark executable with different Makefile command. For the benchmark, creating 2 threads: Producer and consumer (pinned to different cores) which are supposed to run for 100M times. Producer
 pushes QueueOrder instances to the SPSC Queue and the consumer thread pops it. Storing 8 instances of QueueOrders in a array on the stack and using the Producer thread to take instance from it and push to the queue. Instances capacity is chosen as 8 such that the total space needed = 8 * 64 bytes and it can sit comfortably sit inside the L1-D cache of my processor, avoiding the overflow problem. 
 
@@ -43,8 +43,11 @@ Upon creation of the Producer thread, its first pinned to a particular core and 
 
 Same like Producer thread, the Consumer thread is first pinned to a core and then waits for m_start to turn true. When it turns True, its warmed up first with 1M burst. A memory fence is established and it enters the hot loop for 1B iterations.   The Consumer thread will also be in a spin-wait for as long as the Queue is empty and only start with the pop operation when 8 instances are present in the queue. When the condition is satisfied, it takes a peek at it and gets the memory address of the 8 QueueOrder instance which are to be popped. To avoid compiler optimizaton, from the pointer to the QueueOrder instance obtained, it accesses the price field and adds it to the local register accumulators (to make it seem like we are doing something with the pointer) and this is done for every single iteration. Again like Producer thread, there is a batched release of atomic head when count is 8. After the hot loop exit, Memory fence gets closed and the cycles per element is calculated in Consumer thread.
 
-Current overhead:
-![Current overhead](screenshots/current_overhead.png)
+Benchmark **Latency report snippet** with 1 billion iterations in the Lock-free SPSC Queue:
+![Latency report snippet](screenshots/latency_report.png)
+
+The **perf C2C report for the benchmark Lock-Free SPSC Queue** with 1 Billion iterations:
+![Perf C2C report](screenshots/perf_c2c_report.png)
 
 Current problems:
 1. My AMD Zen 3 has L1 Data Cache per core of 32 kb. So, if I create the SPSC Queue with 1024 capacity, so the memory needed to store the QueueOrders = 1024 * 64 = 64 kb, which is more than L1 cache capacity. So, reducing the capacity to 256 since now the memory required = 16 kb and the assertion that capacity should be a power of 2 is also satisfied. (Solved)
@@ -60,9 +63,6 @@ Current problems:
 8. About pinning threads to particular cores (pinning producer thread to CPU 0 Core 0 and consumer thread to CPU 2 Core 1), we have to ensure that the CPU's lie on the same Core Chiplet Die (CCD). Since our threads are pinned to CPU 0 and 2 - they always lie on the same CCD in **AMD RYZEN 5000** chips
    (Solved) - In the 'Zen 3' architecture used for this generation, each CCD contains 8 cores, and the logical-to-physical core mapping assigns Core 0, 1, 2, 3, 4, 5, 6, and 7 sequentially to the first CCD (CCD #0).
 9. For Deterministic Memory binding, I'll have to use mbind which is included in the **numaif.h file** and it needs to be included in the benchmark file. Before that, I'll have to install the dependency on my machine using the command: **sudo apt install libnuma-dev**. Once its installed, then only I can use it in my program. (solved)
-
-Current benchmark performance: The number of **Cycles per element in Consumer thread** = **3** and **Cycles per element in Producer thread** = **4**
-![Current benchmark performance](screenshots/new_cycles_per_element.png)
 
 All commands that Vulcan supports currently:
 ---
@@ -157,7 +157,3 @@ All commands that Vulcan supports currently:
 | `make benchmark-link` | Create `./benchmark` symlink to current config binary | Current |
 
 ---
-
-Some **Latency report snippets** from the Lock-free SPSC Queue (entire report will be uploaded asap after some further optimizations):
-![Latency report snippet 1](screenshots/latency_report_snippet_1.png)
-![Latency report snippet 2](screenshots/latency_report_snippet_2.png)
