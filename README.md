@@ -44,7 +44,7 @@ Upon creation of the Producer thread, its first pinned to a particular core and 
 Same like Producer thread, the Consumer thread is first pinned to a core and then waits for m_start to turn true. When it turns True, its warmed up first with 1M burst. A memory fence is established and it enters the hot loop for 1B iterations.   The Consumer thread will also be in a spin-wait for as long as the Queue is empty and only start with the pop operation when 8 instances are present in the queue. When the condition is satisfied, it takes a peek at it and gets the memory address of the 8 QueueOrder instance which are to be popped. To avoid compiler optimizaton, from the pointer to the QueueOrder instance obtained, it accesses the price field and adds it to the local register accumulators (to make it seem like we are doing something with the pointer) and this is done for every single iteration. Again like Producer thread, there is a batched release of atomic head when count is 8. After the hot loop exit, Memory fence gets closed and the cycles per element is calculated in Consumer thread.
 
 Benchmark **Latency report snippet** with 1 billion iterations in the Lock-free SPSC Queue:
-![Latency report snippet](screenshots/latency_repoty.png)
+![Latency report snippet](screenshots/latency_report.png)
 
 The **perf C2C report for the benchmark Lock-Free SPSC Queue** with 1 Billion iterations:
 ![Perf C2C report](screenshots/perf_c2c_report.png)
