@@ -35,6 +35,11 @@ Using **native_handle()** for **Thread Management with CPU Affinity** (Pinning a
 C++ abstraction and speak directly to the OS Kernel. So, to pin a thread  - we must pass the OS specific thread identifier directly to the Kernel API's and since (Windows and Linux) handle CPU scheduling differently,
 we need to use the native handle of the OS.
 
+**Running tests**
+Tests (Unit + Integration tests) can be run in the terminal from the root directory using the commands given in the below table. All test files will be stored in the tests/ directory.
+
+![Running unit tests from the terminal](screenshots/run_tests.png)
+
 **Benchmarking**:
 For measuring benchmarks performance, building a separate benchmark executable with different Makefile command. For the benchmark, creating 2 threads: Producer and consumer (pinned to different cores) which are supposed to run for 100M times. Producer pushes QueueOrder instances to the SPSC Queue and the consumer thread pops it. Storing 8 instances of QueueOrders in a array on the stack and using the Producer thread to take instance from it and push to the queue. Instances capacity is chosen as 8 such that the total space needed = 8 * 64 bytes and it can sit comfortably sit inside the L1-D cache of my processor, avoiding the overflow problem. 
 
@@ -68,7 +73,7 @@ Current problems:
 8. About pinning threads to particular cores (pinning producer thread to CPU 0 Core 0 and consumer thread to CPU 2 Core 1), we have to ensure that the CPU's lie on the same Core Chiplet Die (CCD). Since our threads are pinned to CPU 0 and 2 - they always lie on the same CCD in **AMD RYZEN 5000** chips
    (Solved) - In the 'Zen 3' architecture used for this generation, each CCD contains 8 cores, and the logical-to-physical core mapping assigns Core 0, 1, 2, 3, 4, 5, 6, and 7 sequentially to the first CCD (CCD #0).
 9. For Deterministic Memory binding, I'll have to use mbind which is included in the **numaif.h file** and it needs to be included in the benchmark file. Before that, I'll have to install the dependency on my machine using the command: **sudo apt install libnuma-dev**. Once its installed, then only I can use it in my program. (solved)
-10. In single threaded unit-tests like suppose pop from an empty queue, the thread will be stuck in a spin-wait situation till there is an element pushed into the queue which can be popped. So, when pop operation spin-waits on empty, we cannot test it in a purely single-threaded, sequential fashion because the test itself would deadlock. The only way forward would be to introduce controlled concurrency - Dual Thread minimal test (design minimal deterministic test harness)  
+10. In single threaded unit-tests like suppose pop from an empty queue, the thread will be stuck in a spin-wait situation till there is an element pushed into the queue which can be popped. So, when pop operation spin-waits on empty, we cannot test it in a purely single-threaded, sequential fashion because the test itself would deadlock. (Solved) - By introducing controlled concurrency - Dual Thread minimal test (design minimal deterministic test harness) implemented by a separate consumer thread function.   
 
 All commands that Vulcan supports currently:
 ---
@@ -112,8 +117,14 @@ All commands that Vulcan supports currently:
 
 | Command | Description |
 |---------|-------------|
-| `make tests` | Build test runner |
-| `make run_tests` | Build and run tests |
+| `make tests` | Build all tests (release) |
+| `make run-tests` | Run all tests (release) |
+| `make unit-tests` | Build all unit tests |
+| `make integration-tests` | Build all integration tests |
+| `make run-test TEST=test_queue` | Run specific test by name (replace test_queue with the name of the actual test) |
+| `make debug-tests` | Debug build (follow it up by running specific tests by name) |
+| `make clean-tests` | Clean test artifacts only |
+| `make clean` | Full clean (including tests) |
 
 ---
 
