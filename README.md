@@ -36,8 +36,7 @@ C++ abstraction and speak directly to the OS Kernel. So, to pin a thread  - we m
 we need to use the native handle of the OS.
 
 **Benchmarking**:
-For measuring benchmarks performance, building a separate benchmark executable with different Makefile command. For the benchmark, creating 2 threads: Producer and consumer (pinned to different cores) which are supposed to run for 100M times. Producer
-pushes QueueOrder instances to the SPSC Queue and the consumer thread pops it. Storing 8 instances of QueueOrders in a array on the stack and using the Producer thread to take instance from it and push to the queue. Instances capacity is chosen as 8 such that the total space needed = 8 * 64 bytes and it can sit comfortably sit inside the L1-D cache of my processor, avoiding the overflow problem. 
+For measuring benchmarks performance, building a separate benchmark executable with different Makefile command. For the benchmark, creating 2 threads: Producer and consumer (pinned to different cores) which are supposed to run for 100M times. Producer pushes QueueOrder instances to the SPSC Queue and the consumer thread pops it. Storing 8 instances of QueueOrders in a array on the stack and using the Producer thread to take instance from it and push to the queue. Instances capacity is chosen as 8 such that the total space needed = 8 * 64 bytes and it can sit comfortably sit inside the L1-D cache of my processor, avoiding the overflow problem. 
 
 Upon creation of the Producer thread, its first pinned to a particular core and it waits for until m_start turns true. An array of 8 QueueOrders is then allocated on the stack to hold instances which will then be pushed to the queue. Then finally when m_start turns True, the Queue is warmed up in Producer thread using 1M push operations and a memory fence is established. The thread finally enters the hot path and starts pushing QueueOrder instances into the queue. It will be in a spin-wait for as long as the Queue is full and only push 8 instances when there is space to do so together. For the Push operation, there is no allocation involved (using Placement new to create the instance directly inside the pre-allocated memory buffer). Replacing the normal single release of atomic tail after every successful push with batched release of 8. After 1B iterations, producer thread exits the hot loop, memory fence is closed and the cycles per element in tbe Producer thread is calculated.  
 
@@ -45,6 +44,12 @@ Same like Producer thread, the Consumer thread is first pinned to a core and the
 
 Benchmark **Latency report snippet** with 1 billion iterations in the Lock-free SPSC Queue:
 ![Latency report snippet](screenshots/latency_report.png)
+
+Perf defines **cache references** as requests that have already escaped the L1/L2 layers. So, the **cache misses** metric in the benchmark performance image is 89.45% of escaped references and not the total memory accesses. 
+
+Why is the Queue missing the Last Level Cache 60 million times? Because of the MESI Cache Coherency Protocol - its processing 1 Billion elements by batching them in strides of 8. So, 1B / 8 = 125M coherency publications across the Infinity Fabric. Every time Core 0 publishes the tail, it issues a Request-For-Ownership (RFO), marking the cache line as Modified (M) and violently invalidating it in Core 2. When Core 2 attempts to read the new batch, the data is physically absent from its local hierarchy. It must miss. Our ~60 million cache misses correlate precisely with the Infinity Fabric coherency strikes required to route the data.
+
+Our IPC is **0.53** because your **pipeline is spending a massive amount of time executing the _mm_pause() intrinsic inside our spin-wait**. _mm_pause() intentionally halts the instruction fetch and decode frontend to prevent speculative execution from consuming power and polluting the L1 while waiting for the MESI RFO response. A low IPC during a lockstep spin-wait means our execution units are perfectly resting, completely starved of branch mispredictions and junk data.
 
 The **perf C2C report for the benchmark Lock-Free SPSC Queue** with 1 Billion iterations:
 ![Perf C2C report](screenshots/perf_c2c_report.png)
@@ -63,6 +68,7 @@ Current problems:
 8. About pinning threads to particular cores (pinning producer thread to CPU 0 Core 0 and consumer thread to CPU 2 Core 1), we have to ensure that the CPU's lie on the same Core Chiplet Die (CCD). Since our threads are pinned to CPU 0 and 2 - they always lie on the same CCD in **AMD RYZEN 5000** chips
    (Solved) - In the 'Zen 3' architecture used for this generation, each CCD contains 8 cores, and the logical-to-physical core mapping assigns Core 0, 1, 2, 3, 4, 5, 6, and 7 sequentially to the first CCD (CCD #0).
 9. For Deterministic Memory binding, I'll have to use mbind which is included in the **numaif.h file** and it needs to be included in the benchmark file. Before that, I'll have to install the dependency on my machine using the command: **sudo apt install libnuma-dev**. Once its installed, then only I can use it in my program. (solved)
+10. In single threaded unit-tests like suppose pop from an empty queue, the thread will be stuck in a spin-wait situation till there is an element pushed into the queue which can be popped. So, when pop operation spin-waits on empty, we cannot test it in a purely single-threaded, sequential fashion because the test itself would deadlock. The only way forward would be to introduce controlled concurrency - Dual Thread minimal test (design minimal deterministic test harness)  
 
 All commands that Vulcan supports currently:
 ---

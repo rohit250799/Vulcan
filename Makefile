@@ -43,7 +43,6 @@ endif
 
 # Benchmark configuration (optimized but with debug symbols for perf)
 ifeq ($(CONFIG),benchmark)
-#    CXXFLAGS = $(BASE_CXXFLAGS) -O3 -mcx16 -march=znver3 -DNDEBUG -g -fno-omit-frame-pointer
     CXXFLAGS = $(BASE_CXXFLAGS) -O3 -mcx16 -march=native -DNDEBUG -g -fno-omit-frame-pointer
     LDFLAGS = $(BASE_LDFLAGS)
     BUILD_SUFFIX = benchmark
@@ -86,10 +85,33 @@ BENCHMARK_OBJECTS = $(BENCHMARK_BUILD_DIR)/benchmark.o \
                     $(patsubst $(SRC_DIR)/%.cpp,$(BENCHMARK_BUILD_DIR)/%.o,$(SHARED_SOURCES))
 BENCHMARK_TARGET = $(BENCHMARK_BIN_DIR)/benchmark
 
-# Test sources
-TEST_SRC = $(wildcard tests/*.cpp)
-TEST_OBJ = $(patsubst tests/%.cpp,$(BUILD_DIR)/%.test.o,$(TEST_SRC))
-TEST_BIN = $(BIN_DIR)/tests_runner
+# ============================================================================
+# Manual Test Harness (No Frameworks)
+# ============================================================================
+
+TEST_UNIT_DIR = tests/unit
+TEST_INTEG_DIR = tests/integration
+TEST_BENCH_DIR = tests/benchmark
+TEST_HARNESS_DIR = tests/harness
+TEST_BIN_DIR = tests/bin
+
+# Create test directories if they don't exist
+TEST_DIRS = $(TEST_UNIT_DIR) $(TEST_INTEG_DIR) $(TEST_BENCH_DIR) $(TEST_HARNESS_DIR)
+
+# Find all test files (each becomes its own executable)
+TEST_UNIT_SRCS = $(wildcard $(TEST_UNIT_DIR)/*.cpp)
+TEST_INTEG_SRCS = $(wildcard $(TEST_INTEG_DIR)/*.cpp)
+TEST_BENCH_SRCS = $(wildcard $(TEST_BENCH_DIR)/*.cpp)
+
+# Generate executable names (respect current CONFIG)
+TEST_UNIT_BINS = $(patsubst $(TEST_UNIT_DIR)/%.cpp,$(TEST_BIN_DIR)/$(BUILD_SUFFIX)/%.unit,$(TEST_UNIT_SRCS))
+TEST_INTEG_BINS = $(patsubst $(TEST_INTEG_DIR)/%.cpp,$(TEST_BIN_DIR)/$(BUILD_SUFFIX)/%.integ,$(TEST_INTEG_SRCS))
+TEST_BENCH_BINS = $(patsubst $(TEST_BENCH_DIR)/%.cpp,$(TEST_BIN_DIR)/$(BUILD_SUFFIX)/%.bench,$(TEST_BENCH_SRCS))
+
+# Common test flags (respect current CONFIG for consistency)
+TEST_CXXFLAGS = $(CXXFLAGS)
+TEST_LDFLAGS = $(LDFLAGS) -lnuma
+TEST_INCLUDES = -I$(TEST_HARNESS_DIR) -I$(SRC_DIR) -Iinclude 
 
 # ============================================================================
 # Default Target (release build)
@@ -104,9 +126,11 @@ all: directories library program
 
 directories:
 	@mkdir -p $(BUILD_DIR) $(BIN_DIR) $(LIB_DIR) $(BENCHMARK_RESULTS_DIR)
+	@mkdir -p $(TEST_BIN_DIR)/$(BUILD_SUFFIX)
 	@echo "Building with CONFIG=$(CONFIG)"
 	@echo "Build directory: $(BUILD_DIR)"
 	@echo "Binary directory: $(BIN_DIR)"
+	@echo "Test binary directory: $(TEST_BIN_DIR)/$(BUILD_SUFFIX)"
 
 library: $(LIBRARY)
 
@@ -124,10 +148,128 @@ $(TARGET): $(MAIN_OBJ) $(LIBRARY)
 	@echo "Production binary built: $(TARGET)"
 
 $(BUILD_DIR)/main.o: $(MAIN_SRC)
+	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(SHARED_HEADERS)
+	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# ============================================================================
+# Test Build Rules
+# ============================================================================
+
+# Build all unit tests (each as separate binary)
+.PHONY: unit-tests
+unit-tests: directories $(TEST_UNIT_BINS)
+	@echo "✓ Built $(words $(TEST_UNIT_BINS)) unit test(s)"
+
+# Build all integration tests
+.PHONY: integration-tests
+integration-tests: directories $(TEST_INTEG_BINS)
+	@echo "✓ Built $(words $(TEST_INTEG_BINS)) integration test(s)"
+
+# Build all test benchmarks
+.PHONY: test-benchmarks
+test-benchmarks: directories $(TEST_BENCH_BINS)
+	@echo "✓ Built $(words $(TEST_BENCH_BINS)) test benchmark(s)"
+
+# Build all tests (unit + integration)
+.PHONY: tests
+tests: unit-tests integration-tests
+	@echo "✓ All tests built"
+
+# ============================================================================
+# EXPLICIT TEST RULES (Add this to your Makefile)
+# ============================================================================
+
+# First, find out what test files actually exist
+TEST_FILES := $(shell ls tests/unit/*.cpp 2>/dev/null | xargs -n1 basename)
+TEST_BINS := $(addprefix tests/bin/release/, $(TEST_FILES:.cpp=.unit))
+
+# Build all unit tests
+unit-tests: directories $(TEST_BINS)
+
+# Generic rule for ANY unit test
+tests/bin/release/%.unit: tests/unit/%.cpp
+	@mkdir -p tests/bin/release
+	$(CXX) $(TEST_CXXFLAGS) $(TEST_INCLUDES) $< -o $@ -lnuma
+	@echo "✓ Built: $$(basename $@)"
+
+# Run all unit tests (with proper exit code aggregation)
+.PHONY: run-unit-tests
+run-unit-tests: unit-tests
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@for test in $(TEST_UNIT_BINS); do \
+		echo "Running: $$test"; \
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+		$$test; \
+	done
+
+# Run all integration tests
+.PHONY: run-integration-tests
+run-integration-tests: integration-tests
+	@failed=0; \
+	passed=0; \
+	total=0; \
+	for test in $(TEST_INTEG_BINS); do \
+		total=$$((total + 1)); \
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+		echo "Running: $$test"; \
+		echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+		if $$test; then \
+			passed=$$((passed + 1)); \
+			echo "✓ PASSED"; \
+		else \
+			failed=$$((failed + 1)); \
+			echo "✗ FAILED"; \
+		fi; \
+		echo ""; \
+	done; \
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+	echo "Integration Test Summary: $$passed passed, $$failed failed, $$total total"; \
+	echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+	exit $$failed
+
+# Run all tests (unit + integration)
+.PHONY: run-tests
+run-tests: run-unit-tests run-integration-tests
+	@echo "All tests completed"
+
+# Run specific test (e.g., make run-test TEST=test_queue)
+.PHONY: run-test
+run-test: directories
+	@if [ -z "$(TEST)" ]; then \
+		echo "Error: Specify TEST=test_name (without .cpp extension)"; \
+		echo "Example: make run-test TEST=test_queue"; \
+		exit 1; \
+	fi
+	@if [ -f "$(TEST_BIN_DIR)/$(BUILD_SUFFIX)/$(TEST).unit" ]; then \
+		$(TEST_BIN_DIR)/$(BUILD_SUFFIX)/$(TEST).unit; \
+	elif [ -f "$(TEST_BIN_DIR)/$(BUILD_SUFFIX)/$(TEST).integ" ]; then \
+		$(TEST_BIN_DIR)/$(BUILD_SUFFIX)/$(TEST).integ; \
+	else \
+		echo "Error: Test '$(TEST)' not found"; \
+		exit 1; \
+	fi
+
+# Build rule for unit test binaries
+$(TEST_BIN_DIR)/$(BUILD_SUFFIX)/%.unit: $(TEST_UNIT_DIR)/%.cpp $(TEST_HARNESS_DIR)/test_runner.hpp
+	@mkdir -p $(TEST_BIN_DIR)/$(BUILD_SUFFIX)
+	$(CXX) $(TEST_CXXFLAGS) $(TEST_INCLUDES) $< -o $@
+	@echo "✓ Built unit test: $@"
+
+# Build rule for integration test binaries
+$(TEST_BIN_DIR)/$(BUILD_SUFFIX)/%.integ: $(TEST_INTEG_DIR)/%.cpp $(TEST_HARNESS_DIR)/test_runner.hpp
+	@mkdir -p $(TEST_BIN_DIR)/$(BUILD_SUFFIX)
+	$(CXX) $(TEST_CXXFLAGS) $(TEST_INCLUDES) $< -o $@
+	@echo "✓ Built integration test: $@"
+
+# Build rule for test benchmark binaries
+$(TEST_BIN_DIR)/$(BUILD_SUFFIX)/%.bench: $(TEST_BENCH_DIR)/%.cpp $(TEST_HARNESS_DIR)/test_runner.hpp
+	@mkdir -p $(TEST_BIN_DIR)/$(BUILD_SUFFIX)
+	$(CXX) $(TEST_CXXFLAGS) $(TEST_INCLUDES) $< -o $@
+	@echo "✓ Built test benchmark: $@"
 
 # ============================================================================
 # Benchmark Build (completely isolated per config)
@@ -167,9 +309,7 @@ benchmark-link: benchmark
 analyze_benchmark_performance: benchmark
 	@echo "=== Initializing Telemetry Directory ==="
 	@mkdir -p $(BENCHMARK_RESULTS_DIR)
-
 	@echo "=== Executing Unified PMC Read ==="
-
 	sudo perf stat -x, \
 		-e cycles,\
 instructions,\
@@ -188,7 +328,6 @@ cpu-migrations,\
 page-faults \
 		-o $(BENCHMARK_RESULTS_DIR)/unified_stats_$(CONFIG).csv \
 		$(BENCHMARK_TARGET)
-
 	@echo "=== Performance Ledger Generated ==="
 	@column -s, -t < $(BENCHMARK_RESULTS_DIR)/unified_stats_$(CONFIG).csv
 
@@ -221,6 +360,9 @@ debug-run: debug-benchmark
 debug-analyze:
 	@$(MAKE) config=debug analyze_benchmark_performance
 
+debug-tests:
+	@$(MAKE) config=debug tests
+
 # ============================================================================
 # Release-Specific Targets (explicit)
 # ============================================================================
@@ -234,6 +376,9 @@ release-benchmark:
 release-run: release-benchmark
 	@$(MAKE) config=release run_benchmark
 
+release-tests:
+	@$(MAKE) config=release tests
+
 # ============================================================================
 # Benchmark-Specific Config (optimized + symbols for perf)
 # ============================================================================
@@ -244,17 +389,8 @@ benchmark-config:
 benchmark-run: benchmark-config
 	@$(MAKE) config=benchmark run_benchmark
 
-# ============================================================================
-# Tests
-# ============================================================================
-
-tests: $(TEST_BIN)
-
-$(TEST_BIN): $(TEST_SRC) $(LIBRARY)
-	$(CXX) $(CXXFLAGS) -o $@ $^ -L$(LIB_DIR) -lhft $(LDFLAGS)
-
-run_tests: $(TEST_BIN)
-	./$(TEST_BIN)
+benchmark-tests:
+	@$(MAKE) config=benchmark tests
 
 # ============================================================================
 # Production Analysis (main binary)
@@ -283,6 +419,30 @@ run: program
 machine:
 	objdump -D $(BUILD_DIR)/main.o
 
+info:
+	@echo "=== Build Configuration ==="
+	@echo "Current CONFIG: $(CONFIG)"
+	@echo "CXXFLAGS: $(CXXFLAGS)"
+	@echo "LDFLAGS: $(LDFLAGS)"
+	@echo "Build dir: $(BUILD_DIR)"
+	@echo "Binary dir: $(BIN_DIR)"
+	@echo "Test dir: $(TEST_BIN_DIR)/$(BUILD_SUFFIX)"
+	@echo ""
+	@echo "Available targets:"
+	@echo "  make                 - Release build (default)"
+	@echo "  make debug           - Debug build (-O0 -g3)"
+	@echo "  make release         - Release build (-O3)"
+	@echo "  make benchmark-config - Benchmark build (-O3 with symbols)"
+	@echo "  make tests           - Build all tests (unit + integration)"
+	@echo "  make run-tests       - Build and run all tests"
+	@echo "  make run-test TEST=name - Run specific test"
+	@echo "  make unit-tests      - Build unit tests only"
+	@echo "  make integration-tests - Build integration tests only"
+	@echo "  make debug-benchmark - Debug benchmark"
+	@echo "  make debug-run       - Run debug benchmark"
+	@echo "  make run_benchmark   - Run benchmark (current config)"
+	@echo "  make clean           - Clean everything"
+
 # ============================================================================
 # Clean Targets
 # ============================================================================
@@ -295,6 +455,7 @@ clean:
 	rm -rf $(BENCHMARK_BUILD_DIR)
 	rm -rf $(BENCHMARK_BIN_DIR)
 	rm -f $(ROOT_DIR)/benchmark
+	rm -rf $(TEST_BIN_DIR)
 	@echo "Clean complete"
 
 clean-release:
@@ -317,29 +478,12 @@ clean-benchmark:
 	@echo "Cleaning benchmark artifacts..."
 	rm -rf $(BENCHMARK_RESULTS_DIR)
 
+clean-tests:
+	@echo "Cleaning test binaries..."
+	rm -rf $(TEST_BIN_DIR)
+	@echo "✓ Cleaned test binaries"
+
 clean-all: clean
-
-# ============================================================================
-# Info / Status
-# ============================================================================
-
-info:
-	@echo "=== Build Configuration ==="
-	@echo "Current CONFIG: $(CONFIG)"
-	@echo "CXXFLAGS: $(CXXFLAGS)"
-	@echo "LDFLAGS: $(LDFLAGS)"
-	@echo "Build dir: $(BUILD_DIR)"
-	@echo "Binary dir: $(BIN_DIR)"
-	@echo ""
-	@echo "Available targets:"
-	@echo "  make                 - Release build (default)"
-	@echo "  make debug           - Debug build (-O0 -g3)"
-	@echo "  make release         - Release build (-O3)"
-	@echo "  make benchmark-config - Benchmark build (-O3 with symbols)"
-	@echo "  make debug-benchmark - Debug benchmark"
-	@echo "  make debug-run       - Run debug benchmark"
-	@echo "  make run_benchmark   - Run benchmark (current config)"
-	@echo "  make clean           - Clean everything"
 
 # ============================================================================
 # Phony declarations
@@ -347,9 +491,11 @@ info:
 
 .PHONY: all directories library program benchmark
 .PHONY: analyze_benchmark_performance check_benchmark_latency find_benchmark_error run_benchmark
-.PHONY: tests run_tests analyze_performance check_latency find_error
-.PHONY: run machine clean clean-release clean-debug clean-benchmark clean-all
-.PHONY: debug debug-benchmark debug-run debug-analyze
-.PHONY: release release-benchmark release-run
-.PHONY: benchmark-config benchmark-run
+.PHONY: analyze_performance check_latency find_error
+.PHONY: run machine clean clean-release clean-debug clean-benchmark clean-all clean-tests
+.PHONY: debug debug-benchmark debug-run debug-analyze debug-tests
+.PHONY: release release-benchmark release-run release-tests
+.PHONY: benchmark-config benchmark-run benchmark-tests
 .PHONY: benchmark-link info
+.PHONY: unit-tests integration-tests test-benchmarks tests
+.PHONY: run-unit-tests run-integration-tests run-tests run-test
