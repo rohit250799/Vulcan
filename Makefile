@@ -110,8 +110,8 @@ TEST_BENCH_BINS = $(patsubst $(TEST_BENCH_DIR)/%.cpp,$(TEST_BIN_DIR)/$(BUILD_SUF
 
 # Common test flags (respect current CONFIG for consistency)
 TEST_CXXFLAGS = $(CXXFLAGS)
-TEST_LDFLAGS = $(LDFLAGS)
-TEST_INCLUDES = -I$(TEST_HARNESS_DIR) -I$(SRC_DIR) -Iinclude
+TEST_LDFLAGS = $(LDFLAGS) -lnuma
+TEST_INCLUDES = -I$(TEST_HARNESS_DIR) -I$(SRC_DIR) -Iinclude 
 
 # ============================================================================
 # Default Target (release build)
@@ -193,7 +193,7 @@ unit-tests: directories $(TEST_BINS)
 # Generic rule for ANY unit test
 tests/bin/release/%.unit: tests/unit/%.cpp
 	@mkdir -p tests/bin/release
-	$(CXX) $(TEST_CXXFLAGS) $(TEST_INCLUDES) $< -o $@
+	$(CXX) $(TEST_CXXFLAGS) $(TEST_INCLUDES) $< -o $@ -lnuma
 	@echo "✓ Built: $$(basename $@)"
 
 # Run all unit tests (with proper exit code aggregation)
@@ -455,6 +455,7 @@ clean:
 	rm -rf $(BENCHMARK_BUILD_DIR)
 	rm -rf $(BENCHMARK_BIN_DIR)
 	rm -f $(ROOT_DIR)/benchmark
+	rm -rf $(TEST_BIN_DIR)
 	@echo "Clean complete"
 
 clean-release:
