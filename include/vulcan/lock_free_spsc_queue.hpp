@@ -89,7 +89,7 @@ void LockFreeSPSCQueue<T, capacity>::producer_uncommitted_push(QueueOrder& qOrde
 
 template<typename T, size_t capacity>
 const QueueOrder* LockFreeSPSCQueue<T, capacity>::consumer_uncommitted_peek(size_t consumer_local_head) noexcept {
-    const QueueOrder* physical_memory_address_offset = reinterpret_cast<QueueOrder*>((this) + 128 + (consumer_local_head & 255) * 64);
+    const QueueOrder* physical_memory_address_offset = reinterpret_cast<QueueOrder*>((this) + 128 + (consumer_local_head & (capacity - 1)) * 64);
     return physical_memory_address_offset;
 }
 
@@ -129,7 +129,7 @@ LockFreeSPSCQueue<T, capacity>* LockFreeSPSCQueue<T, capacity>::create() {
         std::exit(EXIT_FAILURE);
     }
     int current_huge_pages = proc_file.get() - '0';
-    std::cout << "The huge pages value is: " << current_huge_pages << " \n";
+    assert(current_huge_pages == 1 && "Assertion failed: Current huge pages value is not 1, allocation unsuccessful \n");
     if (current_huge_pages != 1) {
         std::cerr << "Huge pages still not 1. Terminating the program \n";
         std::exit(EXIT_FAILURE);
