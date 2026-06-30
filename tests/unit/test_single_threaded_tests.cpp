@@ -69,6 +69,7 @@ static int test_pop_from_empty_queue_fails() {
     TEST_ASSERT_EQ(consumer_emulator_thread.joinable(), true, "Assertion failed: Consumer thread not joinable for pop \n");
     consumer_emulator_thread.join();
     TEST_ASSERT_EQ(pop_empty_queue_result.load(std::memory_order_acquire), true, "Assertion failed: Pop operation failed inside consumer thread body \n");
+    my_queue->destroy_mapping();
     return 0;
 }
 
@@ -89,14 +90,19 @@ static int test_queue_full() {
     local_current_tail = (local_current_tail + 1) & 3;
     my_queue->publish_tail_release(local_current_tail);
     TEST_ASSERT_EQ(my_queue->queue_full(), true, "Assertion failed: Queue is still not full \n");
+    my_queue->destroy_mapping();
     return 0;
 }
 
-void pop_element_from_queue(LockFreeSPSCQueue<QueueOrder, 4>& my_queue_ref) {
+QueueOrder pop_element_from_queue(LockFreeSPSCQueue<QueueOrder, 4>& my_queue_ref) {
     uint64_t local_head_index = my_queue_ref.load_head_acquire();
+    if (local_head_index == my_queue_ref.load_tail_acquire()) {
+        return QueueOrder{};
+    }
     const QueueOrder* current_head_index_ptr = my_queue_ref.consumer_uncommitted_peek(local_head_index);
-    my_queue_ref.publish_head_release(local_head_index);
-    return;
+    QueueOrder current_head_index_value = *current_head_index_ptr;
+    my_queue_ref.publish_head_release(local_head_index + 1);
+    return current_head_index_value;
 }
 
 static int test_fill_to_capacity() {
@@ -119,12 +125,78 @@ static int test_fill_to_capacity() {
     std::thread producer_emulator_thread(test_emulate_push_operation_after_full_capacity, std::ref(*my_queue));
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     TEST_ASSERT_EQ(push_to_full_queue_result.load(std::memory_order_acquire), true, "Assertion failed: Producer emulator thread successfully pushed to full queue \n");
-    pop_element_from_queue(*my_queue);
+    pop_element_from_queue(*my_queue); // now that an element is popped, there should be space to push an element and the producer emulator thread should be joinable
     std::this_thread::sleep_for(std::chrono::seconds(5));
     TEST_ASSERT_EQ(producer_emulator_thread.joinable(), true, "Assertion failed: Producer emulator thread is still not joinable \n");
     producer_emulator_thread.join();
+    //LockFreeSPSCQueue<QueueOrder, 4>::destroy(my_queue);
+    my_queue->destroy_mapping();
     return 0;
 }
+
+static int test_drain_to_empty() {
+    LockFreeSPSCQueue<QueueOrder, 4>* my_queue = LockFreeSPSCQueue<QueueOrder, 4>::create();
+    
+    QueueOrder qOrder1 = QueueOrder{1, 122.43, 29};
+    QueueOrder qOrder2 = QueueOrder{2, 252.3, 54};
+    QueueOrder qOrder3 = QueueOrder{3, 12.7, 45};
+    QueueOrder qOrder4 = QueueOrder{4, 99.9, 10};
+    
+    uint64_t local_current_tail = 0;
+    my_queue->producer_uncommitted_push(qOrder1, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;  // tail = 1    
+    my_queue->producer_uncommitted_push(qOrder2, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;  // tail = 2
+    my_queue->producer_uncommitted_push(qOrder3, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;  // tail = 3
+    my_queue->publish_tail_release(local_current_tail);  // publish tail = 3
+    
+    TEST_ASSERT(my_queue->queue_full(), "Queue should be full after 3 pushes");
+    TEST_ASSERT(!my_queue->queue_empty(), "Queue should not be empty");
+    
+    // --- Pop first element (qOrder1, id=1) ---
+    uint64_t local_current_head = my_queue->load_head_acquire();
+    const QueueOrder* front = my_queue->consumer_uncommitted_peek(local_current_head);
+    TEST_ASSERT_EQ(front->order_id, 1, "Front element should be order_id 1");
+    TEST_ASSERT_EQ(front->price, 122.43, "Price should match qOrder1");
+    TEST_ASSERT_EQ(front->quantity, 29, "Quantity should match qOrder1");
+    pop_element_from_queue(*my_queue);
+    
+    // --- Pop second element (qOrder2, id=2) ---
+    local_current_head = my_queue->load_head_acquire();
+    front = my_queue->consumer_uncommitted_peek(local_current_head);
+    TEST_ASSERT_EQ(front->order_id, 2, "Front element should be order_id 2");
+    pop_element_from_queue(*my_queue);
+    
+    // --- Pop third element (qOrder3, id=3) ---
+    local_current_head = my_queue->load_head_acquire();
+    front = my_queue->consumer_uncommitted_peek(local_current_head);
+    TEST_ASSERT_EQ(front->order_id, 3, "Front element should be order_id 3");
+    pop_element_from_queue(*my_queue);
+    
+    // --- Verify completely drained ---
+    TEST_ASSERT(my_queue->queue_empty(), "Queue should be empty after draining all 3 elements");
+    TEST_ASSERT(!my_queue->queue_full(), "Queue should not be full when empty");
+    
+    // --- Verify peek on empty returns null ---
+    local_current_head = my_queue->load_head_acquire();
+    front = my_queue->consumer_uncommitted_peek(local_current_head);
+    
+    // --- Verify producer can push again after drain ---
+    local_current_tail = my_queue->load_tail_acquire();  // or recalculate from published state
+    my_queue->producer_uncommitted_push(qOrder4, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    my_queue->publish_tail_release(local_current_tail);
+    
+    local_current_head = my_queue->load_head_acquire();
+    front = my_queue->consumer_uncommitted_peek(local_current_head);
+    TEST_ASSERT_EQ(front->order_id, 4, "After drain and re-push, front should be order_id 4");
+    
+    my_queue->destroy_mapping();
+    return 0;
+}
+
+
 
 // Register tests manually (explicit control - no magic macros)
 static TestCase tests[] = {
@@ -132,6 +204,7 @@ static TestCase tests[] = {
     {"pop_from_empty_queue", test_pop_from_empty_queue_fails},
     {"queue_full", test_queue_full},
     {"fill_to_capacity", test_fill_to_capacity},
+    {"drain_to_empty", test_drain_to_empty},
     {nullptr, nullptr}  // Sentinel
 };
  
