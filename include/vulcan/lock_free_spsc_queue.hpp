@@ -51,16 +51,21 @@ class LockFreeSPSCQueue {
     const QueueOrder* consumer_uncommitted_peek(size_t consumer_local_head) noexcept;
     inline void publish_tail_release(size_t new_local_tail);
     inline void publish_head_release(size_t new_local_head);
-    bool push_order_into_queue(const QueueOrder& qOrder);
+    //bool push_order_into_queue(const QueueOrder& qOrder);
     static LockFreeSPSCQueue* create();
     static void destroy(LockFreeSPSCQueue* ptr);
-    const T* peek_into_queue(size_t& current_index) noexcept;
+    //const T* peek_into_queue(size_t& current_index) noexcept;
     void commit_pop_order_from_queue(const T* ptr, size_t index);
     bool queue_full();
     bool queue_empty();
     int get_queue_current_size();
     int get_front_order_id();
     __restrict const T* buffer() noexcept;
+    void destroy_mapping() {
+        size_t size_required = sizeof(LockFreeSPSCQueue<T, capacity>);
+        this->~LockFreeSPSCQueue<T, capacity>();
+        munmap(this, size_required);
+    }
 
     private:
     Metadata_Producer mProducer;
@@ -81,16 +86,28 @@ size_t LockFreeSPSCQueue<T, capacity>::load_tail_acquire() noexcept {
 
 template<typename T, size_t capacity>
 void LockFreeSPSCQueue<T, capacity>::producer_uncommitted_push(QueueOrder& qOrder, size_t current_local_tail) noexcept {
-    auto buffer_address = this + 128 + (current_local_tail & (capacity - 1) << 6);
-    QueueOrder* casted_buffer_address = reinterpret_cast<QueueOrder*>(buffer_address);
-    new (reinterpret_cast<void*>(casted_buffer_address)) QueueOrder(qOrder);
+    char* buffer_base = reinterpret_cast<char*>(this) + 128;
+    size_t slot_index = current_local_tail & (capacity - 1);
+    size_t byte_offset = slot_index << 6;
+    char* slot_address = buffer_base + byte_offset;
+    //auto buffer_address = this + 128 + (current_local_tail & (capacity - 1) << 6);
+    QueueOrder* casted_buffer_address = reinterpret_cast<QueueOrder*>(slot_address);
+    new (casted_buffer_address) QueueOrder(qOrder);
+    //new (reinterpret_cast<void*>(casted_buffer_address)) QueueOrder(qOrder);
     return;
 }
 
 template<typename T, size_t capacity>
 const QueueOrder* LockFreeSPSCQueue<T, capacity>::consumer_uncommitted_peek(size_t consumer_local_head) noexcept {
-    const QueueOrder* physical_memory_address_offset = reinterpret_cast<QueueOrder*>((this) + 128 + (consumer_local_head & (capacity - 1)) * 64);
-    return physical_memory_address_offset;
+    //const QueueOrder* physical_memory_address_offset = reinterpret_cast<QueueOrder*>((this) + 128 + (consumer_local_head & (capacity - 1)) * 64);
+    const char* buffer_base = reinterpret_cast<const char*>(this);
+    size_t index = consumer_local_head & (capacity - 1);
+    // size_t head_index = consumer_local_head & (capacity - 1);
+    size_t byte_offset = 128 + (index << 6);
+    // char* slot_address = buffer_base + byte_offset;
+    // const QueueOrder* physical_memory_address_offset = reinterpret_cast<QueueOrder*>(slot_address);
+    const QueueOrder* slot = reinterpret_cast<const QueueOrder*>(buffer_base + byte_offset);
+    return slot;
 }
 
 template<typename T, size_t capacity>
@@ -161,45 +178,46 @@ LockFreeSPSCQueue<T, capacity>* LockFreeSPSCQueue<T, capacity>::create() {
     for(size_t i = 0; i < (2*1024*1024) / 16; ++i) {
         _mm_stream_si128(simd_obj_ptr + i, zero_vector);
     }
-    return obj;
+    return obj; 
 }
 
 template<typename T, size_t capacity>
 void LockFreeSPSCQueue<T, capacity>::destroy(LockFreeSPSCQueue* ptr) {
+    if (!ptr) { return; }
     ptr->~LockFreeSPSCQueue();
-    free(ptr);
+    //free(ptr);
 }
 
-template<typename T, size_t capacity>
-bool LockFreeSPSCQueue<T, capacity>::push_order_into_queue(const QueueOrder& qOrder) {
-    size_t tail = mProducer.tail.load(std::memory_order_relaxed);
-    size_t next_tail = (tail+1) & (capacity - 1);
-    size_t head = mProducer.head_cached;
-    if (next_tail == mProducer.head_cached) [[likely]] {
-        //queue appears to be full
-        head = mConsumer.head.load(std::memory_order_acquire);
-        mProducer.head_cached = head;
-        if (next_tail == mProducer.head_cached) [[unlikely]] { return false; }
-    }
-    auto buffer_address = reinterpret_cast<std::byte*>(this) + 128 + (tail << 6);
-    new (reinterpret_cast<void*>(buffer_address)) QueueOrder(qOrder);
-    mProducer.tail.store(next_tail, std::memory_order_release);
-    return true;
-}
+// template<typename T, size_t capacity>
+// bool LockFreeSPSCQueue<T, capacity>::push_order_into_queue(const QueueOrder& qOrder) {
+//     size_t tail = mProducer.tail.load(std::memory_order_relaxed);
+//     size_t next_tail = (tail+1) & (capacity - 1);
+//     size_t head = mProducer.head_cached;
+//     if (next_tail == mProducer.head_cached) [[likely]] {
+//         //queue appears to be full
+//         head = mConsumer.head.load(std::memory_order_acquire);
+//         mProducer.head_cached = head;
+//         if (next_tail == mProducer.head_cached) [[unlikely]] { return false; }
+//     }
+//     auto buffer_address = reinterpret_cast<std::byte*>(this) + 128 + (tail << 6);
+//     new (reinterpret_cast<void*>(buffer_address)) QueueOrder(qOrder);
+//     mProducer.tail.store(next_tail, std::memory_order_release);
+//     return true;
+// }
 
-template<typename T, size_t capacity>
-inline const T* LockFreeSPSCQueue<T, capacity>::peek_into_queue(size_t& current_index) noexcept {
-    size_t head = mConsumer.head.load(std::memory_order_relaxed);
-    current_index = head;
-    if (head == mConsumer.tail_cached) [[likely]] {
-        mConsumer.tail_cached = mProducer.tail.load(std::memory_order_acquire);
-        if (head == mConsumer.tail_cached) [[unlikely]] { return nullptr; }
-    }
-    const T* popped_element_ptr = reinterpret_cast<const T*>(
-        reinterpret_cast<const char*>(this) + 128 + (head << 6)
-    );
-    return popped_element_ptr;
-}
+// template<typename T, size_t capacity>
+// inline const T* LockFreeSPSCQueue<T, capacity>::peek_into_queue(size_t& current_index) noexcept {
+//     size_t head = mConsumer.head.load(std::memory_order_relaxed);
+//     current_index = head;
+//     if (head == mConsumer.tail_cached) [[likely]] {
+//         mConsumer.tail_cached = mProducer.tail.load(std::memory_order_acquire);
+//         if (head == mConsumer.tail_cached) [[unlikely]] { return nullptr; }
+//     }
+//     const T* popped_element_ptr = reinterpret_cast<const T*>(
+//         reinterpret_cast<const char*>(this) + 128 + (head << 6)
+//     );
+//     return popped_element_ptr;
+// }
 
 template<typename T, size_t capacity>
 inline void LockFreeSPSCQueue<T, capacity>::commit_pop_order_from_queue(const T* ptr, size_t index) {
