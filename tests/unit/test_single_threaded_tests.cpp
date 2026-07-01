@@ -129,7 +129,6 @@ static int test_fill_to_capacity() {
     std::this_thread::sleep_for(std::chrono::seconds(5));
     TEST_ASSERT_EQ(producer_emulator_thread.joinable(), true, "Assertion failed: Producer emulator thread is still not joinable \n");
     producer_emulator_thread.join();
-    //LockFreeSPSCQueue<QueueOrder, 4>::destroy(my_queue);
     my_queue->destroy_mapping();
     return 0;
 }
@@ -154,7 +153,7 @@ static int test_drain_to_empty() {
     TEST_ASSERT(my_queue->queue_full(), "Queue should be full after 3 pushes");
     TEST_ASSERT(!my_queue->queue_empty(), "Queue should not be empty");
     
-    // --- Pop first element (qOrder1, id=1) ---
+    // Pop first element (qOrder1, id=1)
     uint64_t local_current_head = my_queue->load_head_acquire();
     const QueueOrder* front = my_queue->consumer_uncommitted_peek(local_current_head);
     TEST_ASSERT_EQ(front->order_id, 1, "Front element should be order_id 1");
@@ -162,13 +161,13 @@ static int test_drain_to_empty() {
     TEST_ASSERT_EQ(front->quantity, 29, "Quantity should match qOrder1");
     pop_element_from_queue(*my_queue);
     
-    // --- Pop second element (qOrder2, id=2) ---
+    // Pop second element (qOrder2, id=2)
     local_current_head = my_queue->load_head_acquire();
     front = my_queue->consumer_uncommitted_peek(local_current_head);
     TEST_ASSERT_EQ(front->order_id, 2, "Front element should be order_id 2");
     pop_element_from_queue(*my_queue);
     
-    // --- Pop third element (qOrder3, id=3) ---
+    // Pop third element (qOrder3, id=3)
     local_current_head = my_queue->load_head_acquire();
     front = my_queue->consumer_uncommitted_peek(local_current_head);
     TEST_ASSERT_EQ(front->order_id, 3, "Front element should be order_id 3");
@@ -196,6 +195,82 @@ static int test_drain_to_empty() {
     return 0;
 }
 
+static int test_single_element_full_or_empty_transitions() {
+    LockFreeSPSCQueue<QueueOrder, 4>* my_queue = LockFreeSPSCQueue<QueueOrder, 4>::create();
+    
+    QueueOrder qOrder1 = QueueOrder{1, 122.43, 29};
+    QueueOrder qOrder2 = QueueOrder{2, 252.3, 54};
+    QueueOrder qOrder3 = QueueOrder{3, 12.7, 45};
+    QueueOrder qOrder4 = QueueOrder{4, 99.9, 10};
+    
+    uint64_t local_current_tail = 0;
+    my_queue->producer_uncommitted_push(qOrder1, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    my_queue->publish_tail_release(local_current_tail);
+    TEST_ASSERT_EQ(my_queue->queue_empty(), false, "Assertion failed: Queue is empty.. \n");
+    
+    uint64_t local_current_head = my_queue->load_head_acquire();
+    const QueueOrder* front_order = my_queue->consumer_uncommitted_peek(local_current_head);
+    TEST_ASSERT_EQ(front_order->order_id, 1, "Assertion failed: Front element should be having order id of 1 \n");
+    pop_element_from_queue(*my_queue);
+    
+    TEST_ASSERT_EQ(my_queue->queue_empty(), true, "Assertion failed: Queue should be empty at this point.. \n");
+    my_queue->producer_uncommitted_push(qOrder2, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    my_queue->producer_uncommitted_push(qOrder3, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    TEST_ASSERT_EQ(my_queue->queue_full(), false, "Assertion failed: The queue shouldn't be full at this point.. \n");
+    my_queue->producer_uncommitted_push(qOrder4, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    my_queue->publish_tail_release(local_current_tail);
+    TEST_ASSERT_EQ(my_queue->queue_full(), true, "Assertion failed: The queue should be full at this point.. \n");
+    return 0;
+}
+
+
+static int test_full_wrap_around() {
+    LockFreeSPSCQueue<QueueOrder, 4>* my_queue = LockFreeSPSCQueue<QueueOrder, 4>::create();
+    
+    QueueOrder qOrder1 = QueueOrder{1, 122.43, 29};
+    QueueOrder qOrder2 = QueueOrder{2, 252.3, 54};
+    QueueOrder qOrder3 = QueueOrder{3, 12.7, 45};
+    QueueOrder qOrder4 = QueueOrder{4, 99.9, 10};
+    
+    uint64_t local_current_tail = 0;
+    uint64_t local_current_head = my_queue->load_head_acquire();
+    my_queue->producer_uncommitted_push(qOrder1, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    my_queue->producer_uncommitted_push(qOrder2, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    TEST_ASSERT_EQ(my_queue->queue_full(), false, "Assertion failed: The queue shouldn't be full at this point.. \n");
+    my_queue->producer_uncommitted_push(qOrder3, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    my_queue->publish_tail_release(local_current_tail);
+    TEST_ASSERT_EQ(my_queue->queue_full(), true, "Assertion failed: The queue should be full at this point.. \n");
+    
+    const QueueOrder* front = my_queue->consumer_uncommitted_peek(local_current_head);
+    pop_element_from_queue(*my_queue);
+    const QueueOrder* second_front = my_queue->consumer_uncommitted_peek(local_current_head + 1);
+    pop_element_from_queue(*my_queue);
+    const QueueOrder* end = my_queue->consumer_uncommitted_peek(local_current_head + 2);
+    pop_element_from_queue(*my_queue);
+    local_current_head = my_queue->load_head_acquire();
+    my_queue->publish_head_release(local_current_head);
+    TEST_ASSERT_EQ(my_queue->queue_empty(), true, "Assertion failed: The queue should be empty at this point.. \n");
+    
+    local_current_tail = my_queue->load_tail_acquire();
+    my_queue->producer_uncommitted_push(qOrder1, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    my_queue->producer_uncommitted_push(qOrder2, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    TEST_ASSERT_EQ(my_queue->queue_full(), false, "Assertion failed: The queue shouldn't be full at this point.. \n");
+    my_queue->producer_uncommitted_push(qOrder3, local_current_tail);
+    local_current_tail = (local_current_tail + 1) & 3;
+    my_queue->publish_tail_release(local_current_tail);
+    TEST_ASSERT_EQ(my_queue->queue_full(), true, "Assertion failed: The queue should be full at this point.. \n");
+    
+    return 0;
+}
 
 
 // Register tests manually (explicit control - no magic macros)
@@ -205,6 +280,8 @@ static TestCase tests[] = {
     {"queue_full", test_queue_full},
     {"fill_to_capacity", test_fill_to_capacity},
     {"drain_to_empty", test_drain_to_empty},
+    {"element_full_or_empty_transitions", test_single_element_full_or_empty_transitions},
+    {"full_wrap_around", test_full_wrap_around},
     {nullptr, nullptr}  // Sentinel
 };
  
