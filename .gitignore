@@ -39,3 +39,6 @@
 
 # debug information files
 *.dwo
+
+# my personal notes
+my_project_notes.md

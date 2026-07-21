@@ -35,6 +35,8 @@ Using **native_handle()** for **Thread Management with CPU Affinity** (Pinning a
 C++ abstraction and speak directly to the OS Kernel. So, to pin a thread  - we must pass the OS specific thread identifier directly to the Kernel API's and since (Windows and Linux) handle CPU scheduling differently,
 we need to use the native handle of the OS.
 
+2. **Raw Socket Zero-copy UDP Listener** utilizing mmap'd ring buffers to completely bypass recvfrom data copies
+
 **Running tests**
 Tests (Unit + Integration tests) can be run in the terminal from the root directory using the commands given in the below table. All test files will be stored in the tests/ directory.
 
@@ -59,7 +61,12 @@ Our IPC is **0.53** because your **pipeline is spending a massive amount of time
 The **perf C2C report for the benchmark Lock-Free SPSC Queue** with 1 Billion iterations:
 ![Perf C2C report](screenshots/perf_c2c_report.png)
 
-Current problems:
+**Networking**
+Since we are prioritizing the lowest possible latency, so we would be using AF_PACKET instead of AF_INET. 
+To avoid additional latency overhead due to interrupts and context switches - we are prepared to accept the tradeoff with the cost of higher CPU utilization using Busy Polling on our sockets. As per this technique, when the application asks for more date and there is none in the socket queuem 
+the networking stack actively calls into the device driver - driver checks for newly arrived data and pushes it through the network (L3) layer to the socket. Driver may find data for other sockets and will push that data as well. When poll call returns to the networking stack, the socket code checks whether new data is pending on the socket receive queue. We would be using **Enabling per socket** for this project instead of **Enabling Globally**
+
+**Current problems**:
 1. My AMD Zen 3 has L1 Data Cache per core of 32 kb. So, if I create the SPSC Queue with 1024 capacity, so the memory needed to store the QueueOrders = 1024 * 64 = 64 kb, which is more than L1 cache capacity. So, reducing the capacity to 256 since now the memory required = 16 kb and the assertion that capacity should be a power of 2 is also satisfied. (Solved)
 2. The calling of memset(obj, 0x00, sizeof(*obj)) is a "Cold Path" solution but inefficient. While it warms the physical memory, but doesn't address the Store-To-Load Forwarding conflicts that can occur when transitioning from initializing buffer to high-speed matching loop (solved)
 3. Replacing the memset function call in create function with Non-Temporal Store intrinsics (e.g., _mm_stream_si128), but facing a C++ type-safety violation. (solved)
@@ -68,12 +75,12 @@ Current problems:
    Ubuntu system runs, user-space processes and kernel administrative tasks scatter 4KB allocations across the DRAM, leaving no 2MB gaps of contiguous space. (solved)
 5. A single pop function to pop Orders from Queue is proving to be a Latency trap. Because in such a case of returning the **const pointer** - the function execution ends, but I am still yet to update the head. If I update the index before the consumer has finished processing the order, it would lead to a **Write After Read** hazard where the Producer core (potentially on another physical core in the same CCD) sees the vacant slot, overwrites it and corrupts the data while the Consumer thread is still reading the price. (solved)
 6. Hardware NUMA Pinning - need to use (numactl --membind) as in case of multi-socket architecture, physical memory access costs vary depending on the node and destroy deterministic behaviour
-7. In benchmarks, cycles per element in producer and consumer thread is 17. We need to decrease it further into single-digit numbers. Instructions per cycle = 0.28 (needs to be 1.5+). Branch misses = 1.28% currently, needs to be decreased further (partially solved, now the **cycles per element in both
-   threads is 6**)
-8. About pinning threads to particular cores (pinning producer thread to CPU 0 Core 0 and consumer thread to CPU 2 Core 1), we have to ensure that the CPU's lie on the same Core Chiplet Die (CCD). Since our threads are pinned to CPU 0 and 2 - they always lie on the same CCD in **AMD RYZEN 5000** chips
-   (Solved) - In the 'Zen 3' architecture used for this generation, each CCD contains 8 cores, and the logical-to-physical core mapping assigns Core 0, 1, 2, 3, 4, 5, 6, and 7 sequentially to the first CCD (CCD #0).
+7. In benchmarks, cycles per element in producer and consumer thread is 17. We need to decrease it further into single-digit numbers. Instructions per cycle = 0.28 (needs to be 1.5+). Branch misses = 1.28% currently, needs to be decreased further (partially solved, now the **cycles per element in both threads is 6**)
+8. About pinning threads to particular cores (pinning producer thread to CPU 0 Core 0 and consumer thread to CPU 2 Core 1), we have to ensure that the CPU's lie on the same Core Chiplet Die (CCD). Since our threads are pinned to CPU 0 and 2 - they always lie on the same CCD in **AMD RYZEN 5000** chips (Solved) - In the 'Zen 3' architecture used for this generation, each CCD contains 8 cores, and the logical-to-physical core mapping assigns Core 0, 1, 2, 3, 4, 5, 6, and 7 sequentially to the first CCD (CCD #0).
 9. For Deterministic Memory binding, I'll have to use mbind which is included in the **numaif.h file** and it needs to be included in the benchmark file. Before that, I'll have to install the dependency on my machine using the command: **sudo apt install libnuma-dev**. Once its installed, then only I can use it in my program. (solved)
-10. In single threaded unit-tests like suppose pop from an empty queue, the thread will be stuck in a spin-wait situation till there is an element pushed into the queue which can be popped. So, when pop operation spin-waits on empty, we cannot test it in a purely single-threaded, sequential fashion because the test itself would deadlock. (Solved) - By introducing controlled concurrency - Dual Thread minimal test (design minimal deterministic test harness) implemented by a separate consumer thread function.   
+10. In single threaded unit-tests like suppose pop from an empty queue, the thread will be stuck in a spin-wait situation till there is an element pushed into the queue which can be popped. So, when pop operation spin-waits on empty, we cannot test it in a purely single-threaded, sequential fashion because the test itself would deadlock. (Solved) - By introducing controlled concurrency - Dual Thread minimal test (design minimal deterministic test harness) implemented by a separate consumer thread function.
+11. For a Zero-copy UDP Listener, I would need to achieve Kernel-bypass natively within the Linux Ecosystem using PF_PACKET. Using PACKET_MMAP for efficiency, as it provides a size configurable circular buffer mapped in user space that can be used to either send or receive packets. This way reading packets just needs to wait for them, most of the time there is no need to issue a single system call. Since we would be capturing at high-speeds, checking if device driver of my NIC supports NAPI and making sure its enabled. Creating a Bash script for all this (done)
+12. My current device driver in NIC is Realtek Wi-Fi 6 driver and it **does not support Threaded NAPI which would be a feature for high-performance Low-Latency Trading environments**. But wifi-drivers don't implement it since wifi packet rates are much lower, driver architecture is much different and the feature wasn't designed for wireless. So, this threaded NAPI can't be enabled by me. (Unsolvable - so leaving this issue for now). Only solvable with future upgrades to hardware: Intel 10GbE NIC + wired Ethernet connection and proper Kernel tuning.   
 
 All commands that Vulcan supports currently:
 ---
