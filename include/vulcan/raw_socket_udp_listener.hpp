@@ -3,7 +3,7 @@
 class Zero_Copy_UDP_Listener {
     private:
         int sockfd;
-        void* mmap_ring;
+        void* mmap_rx_ring;
         std::size_t ring_size;
         int target_core;
         
