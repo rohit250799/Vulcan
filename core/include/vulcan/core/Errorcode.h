@@ -16,6 +16,7 @@ enum class ErrorCode : uint8_t {
   ConnectionLost = 2,
   ResourceExhausted = 3, // e.g., ring buffer full, memory pool empty
   InvalidArgument = 4,
+  IO_Error = 5,
 
   // ---- Market data errors (8–11) ----
   CorruptPacket = 8,

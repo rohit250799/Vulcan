@@ -42,3 +42,8 @@
 
 # my personal notes
 my_project_notes.md
+
+#perf data files
+perf.data
+perf.data.old
+*.perf

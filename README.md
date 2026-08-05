@@ -1,5 +1,5 @@
 # Vulcan
-A Low-Latency Trading Engine (Tick-to-Trade system) built from ground up to run on Linux and specific AMD Ryzen 5600H. It acts as a deterministic pipeline. 
+A Low-Latency Trading Engine (Tick-to-Trade system) built from ground up to run on Linux and specific AMD Ryzen 5600H. It acts as a deterministic pipeline with integrated with **Raw Socket Zero-Copy UDP Listener**. 
 On completion, Vulcan will do 4 specific tasks:
 
 1. **Feed Arbitration**: Receiving multiple copies of market data (UDP) and picking the fastest one using Zero-Copy techniques
@@ -26,6 +26,8 @@ Filling the entire allocated block (2 mb) of a Huge Page with the byte value: 0x
 To solve **problem number 4**, 4 steps need to be taken - Modifying GRUB config -> Declaring Pool size -> Committing and Persistent Pinning -> Verification. Appending **hugepages=16** to **GRUB_CMDLINE_LINUX_DEFAULT**
 in **/etc/default/grub** file, updating the GRUB bootloader and then rebooting.
 
+![Get info on the current build](screenshots/make_info.png)
+
 Splitting the monolithic pop function and implementing the **Pinning Pattern** by splitting the operation into 2 phases: **Access** and **Release**
 
 For performance optimization, pinning producer and consumer threads to **Cores 0 and 2** respectively and **Turning Off CPU 1 (offline)** by running the environment hardening script from terminal.
@@ -36,6 +38,13 @@ C++ abstraction and speak directly to the OS Kernel. So, to pin a thread  - we m
 we need to use the native handle of the OS.
 
 2. **Raw Socket Zero-copy UDP Listener** utilizing mmap'd ring buffers to completely bypass recvfrom data copies
+
+How to test if the Server is working:
+  a) Open the terminal and cd to the root directory -> enter the following commands in order
+  b) **make clean** -> **make all** -> **make run** -> The server is running now. 
+  c) Open another terminal on the same machine and in the same directory location -> enter **echo "Hello" | nc -u -w1 localhost 8080** -> **Hello** will be printed to the next line (f nc is not available, install ncat using: **sudo apt install ncat** on Ubuntu)
+  
+![Check the working of UDP Server](screenshots/check_udp_server_working.png)
 
 **Running tests**
 Tests (Unit + Integration tests) can be run in the terminal from the root directory using the commands given in the below table. All test files will be stored in the tests/ directory.
@@ -96,6 +105,10 @@ All commands that Vulcan supports currently:
 | `make program` | Build only main program (release) | ✅ | ❌ |
 | `make library` | Build static library only | Depends on config | Depends on config |
 | `make directories` | Create build directories only | N/A | N/A |
+| `make config=debug` | Build everything in debug mode | N/A | N/A |
+| `make config=benchmark` | Build everything in benchmark mode | N/A | N/A |
+| `make core-library` | Build only the core library (lib/release/libvulcan_core.a) | N/A | N/A |
+| `make feed-library` | Build only the feed library (lib/release/libvulcan_feed.a) | N/A | N/A |
 
 ---
 
@@ -105,6 +118,7 @@ All commands that Vulcan supports currently:
 |---------|-------------|
 | `make info` | Show current configuration and available targets |
 | `make benchmark-link` | Create convenience symlink `./benchmark` |
+| `make format` | Format all C++ source/headers with `clang-format` |
 
 ---
 
@@ -117,6 +131,10 @@ All commands that Vulcan supports currently:
 | `make clean-debug` | Clean only debug build |
 | `make clean-benchmark` | Clean benchmark results only |
 | `make clean-all` | Same as `clean` |
+| `make clean-tests` | Clean test binaries |
+| `make run-unit-tests` | Run unit tests only | N/A | N/A |
+| `make run-integration-tests` | Run integration tests only | N/A | N/A |
+
 
 ---
 
@@ -155,6 +173,8 @@ All commands that Vulcan supports currently:
 | `make analyze_test_performance` | Perf analysis | Test runner |
 | `make check_latency` | Latency analysis | Main program |
 | `make debug-analyze` | Perf analysis on debug benchmark | Debug benchmark |
+| `make valgrind` | Run the main binary under Valgrind (leak checking) |
+| `make valgrind-benchmark` | Run benchmark under Valgrind |
 
 ---
 
