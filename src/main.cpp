@@ -25,7 +25,7 @@
 
 #include "vulcan/lock_free_spsc_queue.hpp"
 #include "vulcan/queue_core.hpp"
-#include "vulcan/raw_socket_udp_listener.hpp"
+#include "vulcan/feed/raw_socket_udp_listener.hpp"
 
 #define SERV_PORT 8080
 
@@ -180,18 +180,8 @@ int main() {
   producer_thread.join();
   consumer_thread.join();
 
-  Zero_Copy_UDP_Listener my_listener;
+  vulcan::feed::Zero_Copy_UDP_Listener my_listener;
   my_listener.test_UDP_ping_pong_with_jitter();
-
-  // int sockfd;
-  // struct sockaddr_in servaddr;
-  // bzero(&servaddr, sizeof(servaddr));
-  // servaddr.sin_family = AF_INET;
-  // servaddr.sin_port = htons(SERV_PORT);
-  // if (inet_pton(AF_INET, argv[1], &servaddr.sin_addr) <= 0)
-  //     err(EXIT_FAILURE, "Connection error");
-
-  // sockfd =
 
   return 0;
 }
