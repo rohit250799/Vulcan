@@ -36,7 +36,19 @@ void bind_or_die(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
   return;
 }
 
-//} // namespace vulcan::feed
+void* mmap_or_die(int sockfd, size_t map_length, int prot = PROT_READ | PROT_WRITE, int flags = MAP_SHARED, off_t offset = 0) {
+    void* mapped_buffer = mmap(0, map_length, prot, flags, sockfd, offset); 
+    if (mapped_buffer == MAP_FAILED)
+        handle_socket_fatal(vulcan::core::ErrorCode::MemoryMappingFailed, errno);
+    return mapped_buffer;
+}
+
+void set_socket_option_or_die(int sockfd, int level, int optname, struct tpacket_req req) {
+    int set_socket_option_result = setsockopt(sockfd, SOL_PACKET, PACKET_RX_RING, (void*) &req, sizeof(req));
+    if (set_socket_option_result == -1) 
+        handle_socket_fatal(vulcan::core::ErrorCode::ResourceAcquisitionFailed, errno);
+    return;
+}
 
 #define SERV_PORT 8080
 
@@ -91,28 +103,28 @@ void dg_cli(FILE *fp, int sockfd, const sockaddr *pservaddr, socklen_t servlen) 
 }
 
 Zero_Copy_UDP_Listener::Zero_Copy_UDP_Listener() {
-  std::cout << "Setting up a zero copy UDP listener";
+    std::cout << "Setting up a zero copy UDP listener";
+    sockfd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_ALL));
+    struct tpacket_req req;
+    req.tp_block_size = 4096;
+    req.tp_frame_size = 2048;
+    req.tp_block_nr = 4;
+    size_t mmap_length = 100;
+    // req.tp_frame_nr = 8; - redundant parameter as packet_set_rings checks the condition is true along with other conditional checking
+    void* mapped_buffer = mmap_or_die(sockfd, mmap_length);
+    //setsockopt(sockfd, SOL_PACKET, PACKET_RX_RING, (void*) &req, sizeof(req));
+    set_socket_option_or_die(sockfd, SOL_PACKET, PACKET_RX_RING, req);
 }
 
-// Zero_Copy_UDP_Listener::init_socket() {
-//     sockfd = socket(AF_PACKET, SOCK_RAW, IPROTO_UDP);
-//     if (sockfd < 0) {
-//         perror("socket");
-//         exit(1);
-//     }
-//     setup_mmap_ring();
-//     return;
-// }
+Zero_Copy_UDP_Listener::~Zero_Copy_UDP_Listener() {
+    close(sockfd);
+}
 
-// void Zero_Copy_UDP_Listener::setup_mmap_ring() {
-//     const size_t memory_space = 16000000;
-//     struct tpacket_req req = {4096, 4, 2048, 8};
-//     setsockopt(sockfd, SOL_PACKET, PACKET_RX_RING, (void*) &req,
-//     sizeof(req)); mmap_rx_ring = mmap(0, memory_space, PROT_READ |
-//     PROT_WRITE, MAP_SHARED, sockfd, 0); if (mmap_rx_ring == MAP_FAILED)
-//         err(EXIT_FAILURE, "mmap");
-//     return;
-// }
+void Zero_Copy_UDP_Listener::setup_mmap_ring() {
+    ring_size = 100 * 2;
+    mmap_rx_ring = mmap_or_die(0, ring_size);
+    return;
+}
 
 // void Zero_Copy_UDP_Listener::poll_loop() {
 //     struct pollfd *pfds;
