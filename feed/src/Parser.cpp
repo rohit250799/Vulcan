@@ -51,11 +51,11 @@ Result<Order, ErrorCode> parse(const Packet &pkt) noexcept {
   // 1. Extract order_id
   auto id_res = extract_field<uint64_t>(pkt, 0);
   if (VULCAN_UNLIKELY(!id_res.has_value())) {
-      record_parse_error(std::move(id_res).error());
-      return std::move(id_res).error();
+    record_parse_error(std::move(id_res).error());
+    return std::move(id_res).error();
   }
   uint64_t order_id = std::move(id_res).value();
-  
+
   // 2. Extract symbol_id
   auto sym_res = extract_field<uint16_t>(pkt, 8);
   if (VULCAN_UNLIKELY(!sym_res.has_value())) {
