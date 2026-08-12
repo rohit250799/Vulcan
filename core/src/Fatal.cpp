@@ -1,26 +1,33 @@
+#include <cstdio>   // snprintf (only in cold code)
+#include <cstdlib>  // abort
+#include <cstring>  // strerror_r
+#include <unistd.h> // write
 #include "vulcan/core/Fatal.h"
-#include "vulcan/core/Errorcode.h"
 #include "vulcan/core/Attributes.h" // VULCAN_COLD, VULCAN_NOINLINE
-#include <cstdio>                   // snprintf (only in cold code)
-#include <cstdlib>                  // abort
-#include <cstring>                  // strerror_r
-#include <unistd.h>                 // write
+#include "vulcan/core/Errorcode.h"
 
 namespace vulcan::core {
-    
-    // core/src/Fatal.cpp (add inside namespace vulcan::core)
-    const char* to_string(ErrorCode code) noexcept {
-        switch (code) {
-            using enum ErrorCode;
-            case None:              return "None";
-            case Timeout:           return "Timeout";
-            case ConnectionLost:    return "ConnectionLost";
-            case ResourceExhausted: return "ResourceExhausted";
-            case CorruptPacket:     return "CorruptPacket";
-            case InvalidArgument:   return "InvalidArgument";
-            default:                return "Unknown";
-        }
-    }
+
+// core/src/Fatal.cpp (add inside namespace vulcan::core)
+const char *to_string(ErrorCode code) noexcept {
+  switch (code) {
+    using enum ErrorCode;
+  case None:
+    return "None";
+  case Timeout:
+    return "Timeout";
+  case ConnectionLost:
+    return "ConnectionLost";
+  case ResourceExhausted:
+    return "ResourceExhausted";
+  case CorruptPacket:
+    return "CorruptPacket";
+  case InvalidArgument:
+    return "InvalidArgument";
+  default:
+    return "Unknown";
+  }
+}
 
 namespace {
 // Convert errno to a string in a thread‑safe way.

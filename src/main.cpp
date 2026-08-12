@@ -23,9 +23,9 @@
 #include <thread>
 #include <type_traits>
 
+#include "vulcan/feed/raw_socket_udp_listener.hpp"
 #include "vulcan/lock_free_spsc_queue.hpp"
 #include "vulcan/queue_core.hpp"
-#include "vulcan/feed/raw_socket_udp_listener.hpp"
 
 #define SERV_PORT 8080
 
@@ -51,6 +51,7 @@ void push_orders_to_queue(LockFreeSPSCQueue<QueueOrder, 256> &queue,
   __cpuid(0, eax, ebx, ecx, edx);
 
   const int TOTAL_BURST_ORDERS = 1000000000;
+  std::cout << "Producer thread is warmed up now.. \n";
 
   for (size_t i = 0; i < TOTAL_BURST_ORDERS; i += 8) {
     uint64_t next_local_tail = (local_current_tail + 8) & 255;
@@ -82,7 +83,6 @@ void push_orders_to_queue(LockFreeSPSCQueue<QueueOrder, 256> &queue,
   }
   queue.publish_tail_release(local_current_tail);
   _mm_lfence();
-  std::cout << "Producer thread is warmed up for now.. \n";
   return;
 }
 
@@ -112,6 +112,8 @@ void pop_orders_from_queue(LockFreeSPSCQueue<QueueOrder, 256> &queue,
       local_register_accumulator_4, local_register_accumulator_5,
       local_register_accumulator_6, local_register_accumulator_7 = 0.0;
 
+  std::cout << "Consumer thread is warmed up now.. \n";
+      
   for (size_t i = 0; i < TOTAL_BURST_ORDERS; i += 8) {
     if (local_head_idx == local_tail_cached) {
       while (local_head_idx == local_tail_cached) {
@@ -158,7 +160,6 @@ void pop_orders_from_queue(LockFreeSPSCQueue<QueueOrder, 256> &queue,
        (local_register_accumulator_4 + local_register_accumulator_5) +
        (local_register_accumulator_6 + local_register_accumulator_7));
   _mm_lfence();
-  std::cout << "Consumer thread is warmed up right now.. \n";
   return;
 }
 
@@ -181,7 +182,9 @@ int main() {
   consumer_thread.join();
 
   vulcan::feed::Zero_Copy_UDP_Listener my_listener;
-  my_listener.test_UDP_ping_pong_with_jitter();
+  // my_listener.test_UDP_ping_pong_with_jitter();
+  //my_listener.setup_mmap_ring();
+  //my_listener.poll_loop();
 
   return 0;
 }

@@ -332,10 +332,10 @@ check_latency: program
 	sudo perf c2c report $(TARGET)
 
 find_error: program
-	gdb -ex "run" -ex "backtrace" -ex "quit" $(TARGET)
+	sudo gdb -ex "run" -ex "backtrace" -ex "quit" $(TARGET)
 
 run: program
-	$(TARGET)
+	sudo $(TARGET)
 
 machine:
 	objdump -D $(BUILD_DIR)/main.o
@@ -390,7 +390,7 @@ format:
 # ============================================================================
 .PHONY: valgrind
 valgrind: program
-	valgrind --leak-check=full --show-leak-kinds=all $(TARGET)
+	sudo valgrind --leak-check=full --show-leak-kinds=all $(TARGET)
 
 .PHONY: valgrind-benchmark
 valgrind-benchmark: benchmark
