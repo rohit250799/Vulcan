@@ -46,6 +46,9 @@ How to test if the Server is working:
   
 ![Check the working of UDP Server](screenshots/check_udp_server_working.png)
 
+This project uses a dedicated Ethernet cable instead of a generic wifi connection to improve latency, packet transfer success rates and to reduce jittering. So, the Zero-Copy UDP Listener will be using **eno1** in this case.
+![Using eno1 for this project](screenshots/ethernet_cable_usage.png)
+
 **Running tests**
 Tests (Unit + Integration tests) can be run in the terminal from the root directory using the commands given in the below table. All test files will be stored in the tests/ directory.
 
