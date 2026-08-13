@@ -1,10 +1,10 @@
 // feed/src/Parser.cpp
-#include <cstdint>
-#include <utility>
 #include "vulcan/feed/Parser.h"
 #include "vulcan/core/Attributes.h" // VULCAN_UNLIKELY, VULCAN_LIKELY
 #include "vulcan/core/Errorcode.h"
 #include "vulcan/feed/ErrorHandling.h"
+#include <cstdint>
+#include <utility>
 
 #include <algorithm> // std::min
 #include <cstring>   // memcpy
