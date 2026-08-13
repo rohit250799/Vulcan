@@ -12,8 +12,9 @@
 #include <cstring>
 #include <future>
 #include <iostream>
-#include <linux/if_packet.h>
 #include <linux/if_ether.h>
+#include <linux/if_packet.h>
+#include <memory>
 #include <netinet/in.h>
 #include <poll.h>
 #include <strings.h>
@@ -24,6 +25,7 @@
 #include <sys/uio.h>
 #include <sys/user.h>
 #include <unistd.h>
+#include <net/if.h>
 
 namespace vulcan::feed {
 
@@ -34,11 +36,11 @@ handle_socket_fatal(vulcan::core::ErrorCode code, int saved_errno) noexcept {
 }
 
 int create_capture_socket_or_die() {
-    //int sockfd = -1;
-    int sockfd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_ALL));
-    if (sockfd == -1)
-        handle_socket_fatal(vulcan::core::ErrorCode::ConnectionLost, errno);
-    return sockfd;
+  // int sockfd = -1;
+  int sockfd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_ALL));
+  if (sockfd == -1)
+    handle_socket_fatal(vulcan::core::ErrorCode::ConnectionLost, errno);
+  return sockfd;
 }
 
 void bind_or_die(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
@@ -49,7 +51,7 @@ void bind_or_die(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
   return;
 }
 
-void* mmap_or_die(int sockfd, size_t map_length,
+void *mmap_or_die(int sockfd, size_t map_length,
                   int prot = PROT_READ | PROT_WRITE, int flags = MAP_SHARED,
                   off_t offset = 0) {
   void *mapped_buffer = mmap(0, map_length, prot, flags, sockfd, offset);
@@ -59,19 +61,21 @@ void* mmap_or_die(int sockfd, size_t map_length,
 }
 
 void handle_polling_error(int polling_returned_value) {
-    if (polling_returned_value == 1)
-        handle_socket_fatal(vulcan::core::ErrorCode::ConnectionLost, errno);
-    if (polling_returned_value == 0)
-        handle_socket_fatal(vulcan::core::ErrorCode::Timeout, errno);
-    return;
+  if (polling_returned_value == 1)
+    handle_socket_fatal(vulcan::core::ErrorCode::ConnectionLost, errno);
+  if (polling_returned_value == 0)
+    handle_socket_fatal(vulcan::core::ErrorCode::Timeout, errno);
+  return;
 }
 
-void set_socket_option_or_die(int sockfd, void* optval, socklen_t optlen, int level=SOL_PACKET, int optname=PACKET_VERSION) {
+void set_socket_option_or_die(int sockfd, void *optval, socklen_t optlen,
+                              int level = SOL_PACKET,
+                              int optname = PACKET_VERSION) {
   assert(sockfd != -1 && "Assertion failed, sockfd is -1 \n");
   int set_socket_option_result =
       setsockopt(sockfd, level, optname, optval, optlen);
   if (set_socket_option_result < 0)
-      handle_socket_fatal(vulcan::core::ErrorCode::ResourceAcquisitionFailed,
+    handle_socket_fatal(vulcan::core::ErrorCode::ResourceAcquisitionFailed,
                         errno);
   return;
 }
@@ -100,7 +104,6 @@ void dg_echo(int sockfd, sockaddr *pcliaddr, socklen_t clilen) {
 
 void dg_cli(FILE *fp, int sockfd, const sockaddr *pservaddr,
             socklen_t servlen) {
-  //int n;
   const int MAXLINE = 1024;
   char sendline[MAXLINE], recvline[MAXLINE + 1];
 
@@ -137,38 +140,59 @@ Zero_Copy_UDP_Listener::Zero_Copy_UDP_Listener() {
   sockfd = create_capture_socket_or_die();
   assert(sockfd != -1 && "Assertion failed: Socket creation returned -1\n");
   set_socket_option_or_die(sockfd, &version, sizeof(version));
-  //void *mapped_buffer = mmap_or_die(sockfd, mmap_length); // for mapping of allocated buffer to user process
-  //setup_mmap_ring();
 }
 
 Zero_Copy_UDP_Listener::~Zero_Copy_UDP_Listener() { close(sockfd); }
 
-void Zero_Copy_UDP_Listener::setup_mmap_ring(struct ring* ring) {
-    unsigned int blocksiz = 1 << 22, framesiz = 1 << 11; // block size will be 4 mb in this case
-    unsigned int blocknum = 64;
-    memset(&ring->req, 0, sizeof(ring->req));
-    ring->req.tp_block_size = blocksiz;
-    ring->req.tp_frame_size = framesiz;
-    ring->req.tp_block_nr = blocknum;
-    ring->req.tp_frame_nr = (blocksiz * blocknum) / framesiz;
-    ring->req.tp_retire_blk_tov = 60;
-    ring->req.tp_feature_req_word = TP_FT_REQ_FILL_RXHASH;
-    size_t mmap_length = 100;
-    // ring_size = 100 * 2;
-    // mmap_rx_ring = mmap_or_die(0, ring_size);
-    return;
+int Zero_Copy_UDP_Listener::setup_mmap_ring(struct ring *ring) {
+  unsigned int blocksiz = 1 << 22,
+               framesiz = 1 << 11; // block size will be 4 mb in this case
+  unsigned int blocknum = 64;
+  memset(&ring->req, 0, sizeof(ring->req));
+  ring->req.tp_block_size = blocksiz;
+  ring->req.tp_frame_size = framesiz;
+  ring->req.tp_block_nr = blocknum;
+  ring->req.tp_frame_nr = (blocksiz * blocknum) / framesiz;
+  ring->req.tp_retire_blk_tov = 60;
+  ring->req.tp_feature_req_word = TP_FT_REQ_FILL_RXHASH;
+  set_socket_option_or_die(sockfd, &ring->req, sizeof(ring->req), SOL_PACKET,
+                           PACKET_RX_RING);
+
+  struct sockaddr_ll ll;
+  ring->map = (uint8_t *)mmap_or_die(
+      sockfd, ring->req.tp_block_size * ring->req.tp_block_nr,
+      PROT_READ | PROT_WRITE, MAP_SHARED | MAP_LOCKED);
+  ring->rd =
+      std::make_unique<struct iovec[]>(ring->req.tp_block_nr); // need to allocate certain bytes of memory (block numbers * size of rd struct), example shown in my_project_notes.md
+  assert(ring->rd);
+  for (int i = 0; i < ring->req.tp_block_nr; ++i) {
+      ring->rd[i].iov_base = ring->map + (i * ring->req.tp_block_size);
+      ring->rd[i].iov_len = ring->req.tp_block_size;
+  }
+  
+  memset(&ll, 0, sizeof(ll));
+  ll.sll_family = AF_PACKET;
+  ll.sll_protocol = htons(ETH_P_ALL);
+  ll.sll_ifindex = if_nametoindex("eno1"); // since I am using the Ethernet port for this project
+  ll.sll_hatype = 0;
+  ll.sll_pkttype = 0;
+  ll.sll_halen = 0;
+  
+  bind_or_die(sockfd, (struct sockaddr*) &ll, sizeof(ll));
+  std::cout << "Ring has been setup \n";
+  return sockfd;
 }
 
 void Zero_Copy_UDP_Listener::poll_loop() {
   struct pollfd pfd;
-  struct tpacket_hdr* ps_header;
+  struct tpacket_hdr *ps_header;
   pfd.fd = sockfd;
   pfd.revents = 0;
   pfd.events = POLLIN | POLLRDNORM | POLLERR;
 
   if (ps_header->tp_status == TP_STATUS_KERNEL) {
-       int retval = poll(&pfd, 1, 0);
-       handle_polling_error(retval);
+    int retval = poll(&pfd, 1, 0);
+    handle_polling_error(retval);
   }
   return;
 }

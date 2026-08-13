@@ -113,7 +113,7 @@ void pop_orders_from_queue(LockFreeSPSCQueue<QueueOrder, 256> &queue,
       local_register_accumulator_6, local_register_accumulator_7 = 0.0;
 
   std::cout << "Consumer thread is warmed up now.. \n";
-      
+
   for (size_t i = 0; i < TOTAL_BURST_ORDERS; i += 8) {
     if (local_head_idx == local_tail_cached) {
       while (local_head_idx == local_tail_cached) {
@@ -181,10 +181,12 @@ int main() {
   producer_thread.join();
   consumer_thread.join();
 
+  vulcan::feed::ring my_ring{};
+  
   vulcan::feed::Zero_Copy_UDP_Listener my_listener;
   // my_listener.test_UDP_ping_pong_with_jitter();
-  //my_listener.setup_mmap_ring();
-  //my_listener.poll_loop();
+  my_listener.setup_mmap_ring(&my_ring);
+  // my_listener.poll_loop();
 
   return 0;
 }

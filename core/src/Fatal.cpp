@@ -1,10 +1,10 @@
+#include "vulcan/core/Fatal.h"
+#include "vulcan/core/Attributes.h" // VULCAN_COLD, VULCAN_NOINLINE
+#include "vulcan/core/Errorcode.h"
 #include <cstdio>   // snprintf (only in cold code)
 #include <cstdlib>  // abort
 #include <cstring>  // strerror_r
 #include <unistd.h> // write
-#include "vulcan/core/Fatal.h"
-#include "vulcan/core/Attributes.h" // VULCAN_COLD, VULCAN_NOINLINE
-#include "vulcan/core/Errorcode.h"
 
 namespace vulcan::core {
 
