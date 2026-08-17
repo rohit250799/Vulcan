@@ -44,10 +44,35 @@ How to test if the Server is working:
   b) **make clean** -> **make all** -> **make run** -> The server is running now. 
   c) Open another terminal on the same machine and in the same directory location -> enter **echo "Hello" | nc -u -w1 localhost 8080** -> **Hello** will be printed to the next line (f nc is not available, install ncat using: **sudo apt install ncat** on Ubuntu)
   
-![Check the working of UDP Server](screenshots/check_udp_server_working.png)
-
 This project uses a dedicated Ethernet cable instead of a generic wifi connection to improve latency, packet transfer success rates and to reduce jittering. So, the Zero-Copy UDP Listener will be using **eno1** in this case.
 ![Using eno1 for this project](screenshots/ethernet_cable_usage.png)
+
+**How I tested the Raw socket UDP Listener**:
+- Build and run the project with the correct permissions (need sudo for this)
+- In the machine running Vulcan, opening another terminal window to check the tcpdump logs
+- Used a separate computer (Ubuntu) and used netcat from the terminal to send packets to the machine running the project Vulcan (using the host device's ip address and port number)
+- The logs appear in the tcpdump terminal window and the RX hashes appear in the application terminal window
+- The picture underneath shows how it looks:
+
+![Check the working of UDP Server](screenshots/udp_listener_testing.png)
+
+**current status**
+The zero-copy UDP listener is working perfectly. The rxhash values we're seeing are the packet hashes from the kernel's receive flow, and the constant stream of hashes demonstrates that our application is successfully receiving and processing UDP packets in a tight loop. The rxhash: 0x... values — These are the kernel's RSS hash for each received packet. 
+
+**Current problem**:
+The constant stream of rxhash prints means your application is polling the socket in a tight loop and printing the hash for every poll attempt, not just when a packet arrives. The repeating values suggest:
+  - We're using recvfrom() or recvmmsg() in a loop, and the kernel is returning the same packet or status repeatedly
+  - We're reading from the ring buffer without advancing the consumer index (same bug pattern as your SPSC queue earlier!)
+  - The same packet is being delivered multiple times because the receive queue isn't being drained properly
+    
+**Next focus on solving this problem**:
+  - Advancing the consumer/read index after processing each packet
+  - Only printing when a new packet arrives (track sequence numbers or compare timestamps)
+  - Verifying the actual payload is received correctly
+
+The repeating rxhash values (especially 0x74ad68d appearing 4 times consecutively) strongly suggests you're re-reading the same packet from the ring buffer without advancing the read pointer.
+
+The tcpdump confirms the packet was sent and received correctly on port 8080
 
 **Running tests**
 Tests (Unit + Integration tests) can be run in the terminal from the root directory using the commands given in the below table. All test files will be stored in the tests/ directory.
