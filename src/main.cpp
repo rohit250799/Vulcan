@@ -1,3 +1,9 @@
+#include <csignal>
+#include <cstdio>
+#include <cstring>
+#include <linux/if_packet.h>
+#include <sys/poll.h>
+#include <unistd.h>
 #define _GNU_SOURCE
 
 #include <array>
@@ -163,7 +169,7 @@ void pop_orders_from_queue(LockFreeSPSCQueue<QueueOrder, 256> &queue,
   return;
 }
 
-int main() {
+int main(int argc, char **argp) {
   int core1 = 0;
   int core2 = 2;
   std::atomic<bool> m_start(false);
@@ -181,12 +187,48 @@ int main() {
   producer_thread.join();
   consumer_thread.join();
 
+  //-------------------------------- Lock free spsc queue ends
+  //------------------------------------
+
+  struct pollfd pfd;
+  unsigned int block_num = 0, blocks = 64;
+  struct vulcan::feed::block_desc *pbd;
+  struct tpacket_stats_v3 stats {};
+
+  if (argc != 2) {
+    fprintf(stderr, "Usage: %s INTERFACE\n", argp[0]);
+    return EXIT_FAILURE;
+  }
+
   vulcan::feed::ring my_ring{};
-  
   vulcan::feed::Zero_Copy_UDP_Listener my_listener;
-  // my_listener.test_UDP_ping_pong_with_jitter();
+  signal(SIGINT, vulcan::feed::Zero_Copy_UDP_Listener::sighandler);
+
   my_listener.setup_mmap_ring(&my_ring);
-  // my_listener.poll_loop();
+
+  memset(&pfd, 0, sizeof(pfd));
+  pfd.fd = my_listener.get_sockfd();
+  assert(pfd.fd >= 0 && "Assertion failed: Invalid packet socket\n");
+  pfd.events = POLLIN | POLLERR;
+  pfd.revents = 0;
+
+  while (!my_listener.sigint) {
+    pbd = (struct vulcan::feed::block_desc *)my_ring.rd[block_num].iov_base;
+    if ((pbd->h1.block_status & TP_STATUS_USER) == 0) {
+      poll(&pfd, 1, -1);
+      continue;
+    }
+    my_listener.walk_block(pbd, block_num);
+    my_listener.flush_block(pbd);
+    block_num = (block_num + 1) % blocks;
+  }
+  socklen_t len = sizeof(stats);
+  vulcan::feed::get_socket_option_or_die(my_listener.get_sockfd(), &stats,
+                                         &len);
+  fflush(stdout);
+  printf("\nReceived %u packets, %lu bytes, %u dropped, freeze_q_cnt: %u\n",
+         stats.tp_packets, my_listener.bytes_total, stats.tp_drops,
+         stats.tp_freeze_q_cnt);
 
   return 0;
 }
