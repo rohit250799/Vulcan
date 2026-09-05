@@ -16,6 +16,56 @@ On completion, Vulcan will do 4 specific tasks:
 Current benchmark performance: The number of **Cycles per element in Consumer thread** = **3** and **Cycles per element in Producer thread** = **4**
 ![Current benchmark performance](screenshots/new_cycles_per_element.png)
 
+**Project Requirements:**
+ - GCC 13+ (or Clang 17+) with C++20 support
+ - CMake 3.25+
+ - Ninja
+ - libnuma-dev (Fedora: numactl-devel)
+ - just — task runner (Fedora/Ubuntu: sudo dnf install just / see just's install docs for apt)
+ - all the requirements can be installed using a single command from the terminal: **sudo apt install cmake ninja-build libnuma-dev gcc g++**
+ 
+ **Quick Start:**
+ - just release  # configure + build a release binary
+ - just test     # configure + build + run the test suite (debug)
+ - just run      # run the built release binary (needs sudo - raw sockets)
+ 
+ Run **just --list** to see every available command (build, test, debug tools, performance analysis etc.). For full reference, a Build and Debug guide will be uploaded later
+ 
+ ---
+
+##  Build Configurations
+
+| Preset | Purpose | Command |
+|---------|-------------|--------|
+| `debug` | Full symbols, no optimization, assertions live | `just debug` |
+| `release` | -O3, LTO, stripped, assertions compiled out | `just release` |
+| `benchmark` | Release-level optimization + -march=native, symbols kept, for local profiling | `just bench-build` |
+
+---
+
+##  Testing
+
+| Command | Purpose | 
+|---------|-------------|
+| `just test` | All tests, debug build |
+| `just test-one <test_name>` | a single test by name |
+Note: correctness assertions in tests only fire in debug builds — release compiles out assert() via -DNDEBUG, so a "passing" release test only means nothing crashed, not that assertions were checked.
+
+---
+
+##  Project Layout
+
+| Directory | Purpose | 
+|---------|-------------|
+| `core/` | shared primitives (Result/Error types, Fatal handling) |
+| `feed/` | market data feed parsing + raw-socket UDP ingestion |
+| `include/` | header-only components (lock-free SPSC queue) |
+| `src/` | main executable |
+| `tests/` | unit + integration tests (CTest) |
+| `benchmarks/` | standalone benchmark library |
+
+---
+
 Currently working on:
 1. **Lock-free SPSC circular Queue**
 This Queue stores QueueOrder instances inside it upto a certain capacity. Its created inside the pre-allocated memory directly using placement new in static factory method. It contains 2 member variables 
@@ -56,7 +106,7 @@ This project uses a dedicated Ethernet cable instead of a generic wifi connectio
 
 ![Check the working of UDP Server](screenshots/udp_listener_testing.png)
 
-**current status**
+**Current status:**
 The zero-copy UDP listener is working perfectly. The rxhash values we're seeing are the packet hashes from the kernel's receive flow, and the constant stream of hashes demonstrates that our application is successfully receiving and processing UDP packets in a tight loop. The rxhash: 0x... values — These are the kernel's RSS hash for each received packet. 
 
 **Current problem**:
@@ -117,115 +167,4 @@ the networking stack actively calls into the device driver - driver checks for n
 9. For Deterministic Memory binding, I'll have to use mbind which is included in the **numaif.h file** and it needs to be included in the benchmark file. Before that, I'll have to install the dependency on my machine using the command: **sudo apt install libnuma-dev**. Once its installed, then only I can use it in my program. (solved)
 10. In single threaded unit-tests like suppose pop from an empty queue, the thread will be stuck in a spin-wait situation till there is an element pushed into the queue which can be popped. So, when pop operation spin-waits on empty, we cannot test it in a purely single-threaded, sequential fashion because the test itself would deadlock. (Solved) - By introducing controlled concurrency - Dual Thread minimal test (design minimal deterministic test harness) implemented by a separate consumer thread function.
 11. For a Zero-copy UDP Listener, I would need to achieve Kernel-bypass natively within the Linux Ecosystem using PF_PACKET. Using PACKET_MMAP for efficiency, as it provides a size configurable circular buffer mapped in user space that can be used to either send or receive packets. This way reading packets just needs to wait for them, most of the time there is no need to issue a single system call. Since we would be capturing at high-speeds, checking if device driver of my NIC supports NAPI and making sure its enabled. Creating a Bash script for all this (done)
-12. My current device driver in NIC is Realtek Wi-Fi 6 driver and it **does not support Threaded NAPI which would be a feature for high-performance Low-Latency Trading environments**. But wifi-drivers don't implement it since wifi packet rates are much lower, driver architecture is much different and the feature wasn't designed for wireless. So, this threaded NAPI can't be enabled by me. (Unsolvable - so leaving this issue for now). Only solvable with future upgrades to hardware: Intel 10GbE NIC + wired Ethernet connection and proper Kernel tuning.   
-
-All commands that Vulcan supports currently:
----
-
-## Build Commands
-
-| Command | Description | Optimizations | Debug Symbols |
-|---------|-------------|---------------|----------------|
-| `make` or `make all` | Default release build | ✅ Full -O3 | ❌ Stripped |
-| `make release` | Explicit release build | ✅ Full -O3 | ❌ Stripped |
-| `make debug` | Debug build (no optimizations) | ❌ -O0 | ✅ Full -g3 |
-| `make benchmark-config` | Benchmark build (optimized + symbols) | ✅ -O3 | ✅ Minimal -g |
-| `make program` | Build only main program (release) | ✅ | ❌ |
-| `make library` | Build static library only | Depends on config | Depends on config |
-| `make directories` | Create build directories only | N/A | N/A |
-| `make config=debug` | Build everything in debug mode | N/A | N/A |
-| `make config=benchmark` | Build everything in benchmark mode | N/A | N/A |
-| `make core-library` | Build only the core library (lib/release/libvulcan_core.a) | N/A | N/A |
-| `make feed-library` | Build only the feed library (lib/release/libvulcan_feed.a) | N/A | N/A |
-
----
-
-##  Utility Commands
-
-| Command | Description |
-|---------|-------------|
-| `make info` | Show current configuration and available targets |
-| `make benchmark-link` | Create convenience symlink `./benchmark` |
-| `make format` | Format all C++ source/headers with `clang-format` |
-
----
-
-##  Clean Commands
-
-| Command | Description |
-|---------|-------------|
-| `make clean` | Clean everything (all builds, benchmarks, symlinks) |
-| `make clean-release` | Clean only release build |
-| `make clean-debug` | Clean only debug build |
-| `make clean-benchmark` | Clean benchmark results only |
-| `make clean-all` | Same as `clean` |
-| `make clean-tests` | Clean test binaries |
-| `make run-unit-tests` | Run unit tests only | N/A | N/A |
-| `make run-integration-tests` | Run integration tests only | N/A | N/A |
-
-
----
-
-##  Test Commands
-
-| Command | Description |
-|---------|-------------|
-| `make tests` | Build all tests (release) |
-| `make run-tests` | Run all tests (release) |
-| `make unit-tests` | Build all unit tests |
-| `make integration-tests` | Build all integration tests |
-| `make run-test TEST=test_queue` | Run specific test by name (replace test_queue with the name of the actual test) |
-| `make debug-tests` | Debug build (follow it up by running specific tests by name) |
-| `make clean-tests` | Clean test artifacts only |
-| `make clean` | Full clean (including tests) |
-
----
-
-##  Debug Commands
-
-| Command | Description | Binary |
-|---------|-------------|--------|
-| `make find_benchmark_error` | GDB backtrace on benchmark | Benchmark (current config) |
-| `make find_error` | GDB backtrace on main program | `vulcan` |
-| `make machine` | Disassemble `main.o` | Object file |
-
----
-
-##  Performance Analysis Commands
-
-| Command | Description | Target Binary |
-|---------|-------------|----------------|
-| `make analyze_benchmark_performance` | Full perf analysis (cache, CPU, memory) | Benchmark |
-| `make check_benchmark_latency` | Latency and cache‑coherence analysis | Benchmark |
-| `make analyze_performance` | Full perf analysis | Main program (`vulcan`) |
-| `make analyze_test_performance` | Perf analysis | Test runner |
-| `make check_latency` | Latency analysis | Main program |
-| `make debug-analyze` | Perf analysis on debug benchmark | Debug benchmark |
-| `make valgrind` | Run the main binary under Valgrind (leak checking) |
-| `make valgrind-benchmark` | Run benchmark under Valgrind |
-
----
-
-##  Run Commands
-
-| Command | Description | Binary Used |
-|---------|-------------|--------------|
-| `make run` | Run main production binary | `bin/release/vulcan` |
-| `make run_benchmark` | Run benchmark (release default) | `benchmarks/bin/release/benchmark` |
-| `make debug-run` | Run debug benchmark | `benchmarks/bin/debug/benchmark` |
-| `make release-run` | Run release benchmark | `benchmarks/bin/release/benchmark` |
-| `make benchmark-run` | Run benchmark‑config build | `benchmarks/bin/benchmark/benchmark` |
-
----
-
-##  Benchmark‑Specific Build Commands
-
-| Command | Description | Config Used |
-|---------|-------------|--------------|
-| `make benchmark` | Build benchmark (release default) | release |
-| `make debug-benchmark` | Build benchmark with debug symbols | debug |
-| `make release-benchmark` | Build benchmark with optimizations (no symbols) | release |
-| `make benchmark-config` | Build benchmark optimized + symbols for perf | benchmark |
-| `make benchmark-link` | Create `./benchmark` symlink to current config binary | Current |
-
----
+12. My current device driver in NIC is Realtek Wi-Fi 6 driver and it **does not support Threaded NAPI which would be a feature for high-performance Low-Latency Trading environments**. But wifi-drivers don't implement it since wifi packet rates are much lower, driver architecture is much different and the feature wasn't designed for wireless. So, this threaded NAPI can't be enabled by me. (Unsolvable - so leaving this issue for now). Only solvable with future upgrades to hardware: Intel 10GbE NIC + wired Ethernet connection and proper Kernel tuning.

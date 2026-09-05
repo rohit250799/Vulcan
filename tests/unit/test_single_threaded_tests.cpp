@@ -28,7 +28,12 @@ void test_emulate_consumer_thread_in_pop_empty_operation(
     LockFreeSPSCQueue<QueueOrder, 4> &my_queue_ref) {
   uint64_t local_head_index = 0;
   uint64_t local_tail_cached = 0;
-  const QueueOrder *current_head_index_pointer =
+  while (local_head_index == local_tail_cached) {
+      _mm_pause();
+      local_tail_cached = my_queue_ref.load_tail_acquire();
+  }
+  
+  const QueueOrder* current_head_index_pointer =
       my_queue_ref.consumer_uncommitted_peek(0);
   assert(current_head_index_pointer->order_id == 1 &&
          "Assertion failed: Order id of the head order is not what was "
@@ -74,17 +79,20 @@ static int test_pop_from_empty_queue_fails() {
   uint64_t local_current_tail = 0;
   TEST_ASSERT(my_queue->queue_empty(),
               "Assertion failed: Queue is not empty on creation \n");
-  QueueOrder qOrder1 = QueueOrder{1, 122.43, 29};
-  std::thread consumer_emulator_thread(
-      test_emulate_consumer_thread_in_pop_empty_operation, std::ref(*my_queue));
+  QueueOrder qOrder1 = QueueOrder{1, 122.43, 29}; // after insertion, we have to update the tail index
+  TEST_ASSERT(my_queue->queue_empty(),
+              "Assertion failed: Queue is not empty on creation \n");
+  std::thread consumer_emulator_thread(test_emulate_consumer_thread_in_pop_empty_operation, std::ref(*my_queue));
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   my_queue->producer_uncommitted_push(qOrder1, 0);
+  local_current_tail = (local_current_tail + 1) & 3;
   my_queue->publish_tail_release(local_current_tail);
   TEST_ASSERT_EQ(my_queue->queue_empty(), false,
-                 "Assertion failed: Queue is still empty \n");
+                 "Assertion failed: publish_tail_release failed to make item visible on producer core.. \n");
   TEST_ASSERT_EQ(consumer_emulator_thread.joinable(), true,
                  "Assertion failed: Consumer thread not joinable for pop \n");
   consumer_emulator_thread.join();
+  TEST_ASSERT_EQ(my_queue->queue_empty(), true, "Assertion failed: Queue not yet empty.. \n");
   TEST_ASSERT_EQ(
       pop_empty_queue_result.load(std::memory_order_acquire), true,
       "Assertion failed: Pop operation failed inside consumer thread body \n");
