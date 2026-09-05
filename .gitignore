@@ -47,3 +47,10 @@ my_project_notes.md
 perf.data
 perf.data.old
 *.perf
+
+#build directory and other unnecessary things after Cmake migtation successful
+build/
+perf_results/
+benchmarks/results/
+test.pcap
+MIGRATION_NOTES.md
