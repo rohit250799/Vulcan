@@ -55,5 +55,4 @@ public:
   void poll_loop(); // critical hot-path, no syscalls allowed here
   void test_UDP_ping_pong_with_jitter();
 };
-
-} // namespace vulcan::feed
+}

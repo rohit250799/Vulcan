@@ -1,3 +1,5 @@
+//import vulcan.feed.zero_copy_udp_listener;
+
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -220,7 +222,7 @@ int main(int argc, char **argp) {
     }
     my_listener.walk_block(pbd, block_num);
     my_listener.flush_block(pbd);
-    block_num = (block_num + 1) % blocks;
+    block_num = (block_num + 1) % blocks; // replace % 64 with & 63 (advancing the block number)
   }
   socklen_t len = sizeof(stats);
   vulcan::feed::get_socket_option_or_die(my_listener.get_sockfd(), &stats,
