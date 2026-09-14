@@ -1,5 +1,3 @@
-//import vulcan.feed.zero_copy_udp_listener;
-
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -34,8 +32,6 @@
 #include "vulcan/feed/raw_socket_udp_listener.hpp"
 #include "vulcan/lock_free_spsc_queue.hpp"
 #include "vulcan/queue_core.hpp"
-
-#define SERV_PORT 8080
 
 void push_orders_to_queue(LockFreeSPSCQueue<QueueOrder, 256> &queue,
                           std::atomic<bool> &m_start_ref, int core_id) {
@@ -222,7 +218,8 @@ int main(int argc, char **argp) {
     }
     my_listener.walk_block(pbd, block_num);
     my_listener.flush_block(pbd);
-    block_num = (block_num + 1) % blocks; // replace % 64 with & 63 (advancing the block number)
+    block_num = (block_num + 1) %
+                blocks; // replace % 64 with & 63 (advancing the block number)
   }
   socklen_t len = sizeof(stats);
   vulcan::feed::get_socket_option_or_die(my_listener.get_sockfd(), &stats,
