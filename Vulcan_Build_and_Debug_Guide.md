@@ -160,3 +160,9 @@ git show pre-cmake-migration:Makefile
 Next planned step: incrementally converting `core/include` headers (fewest
 dependents) to C++20 modules, starting only after this build has been stable
 for a while.
+
+This was attempted and paused, with the reason being: Hit an open compiler defect 
+(module ownership of implicitly-instantiated STL templates — see LLVM #125521, fixed 
+upstream Nov 2025 but not yet in our GCC 14.2 toolchain) affecting any module that first-instantiates 
+std::unique_ptr/std::thread machinery. Not fixable at the CMake/source level. Revisit once GCC/Clang 
+have absorbed more fixes with commit: **commit fc1d71329ced63d954e5649eb157ee6d928e0c2e** and the tag name: **tag: attempted-cxx20-modules-gcc14**
