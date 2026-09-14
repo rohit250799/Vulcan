@@ -76,8 +76,6 @@ Filling the entire allocated block (2 mb) of a Huge Page with the byte value: 0x
 To solve **problem number 4**, 4 steps need to be taken - Modifying GRUB config -> Declaring Pool size -> Committing and Persistent Pinning -> Verification. Appending **hugepages=16** to **GRUB_CMDLINE_LINUX_DEFAULT**
 in **/etc/default/grub** file, updating the GRUB bootloader and then rebooting.
 
-![Get info on the current build](screenshots/make_info.png)
-
 Splitting the monolithic pop function and implementing the **Pinning Pattern** by splitting the operation into 2 phases: **Access** and **Release**
 
 For performance optimization, pinning producer and consumer threads to **Cores 0 and 2** respectively and **Turning Off CPU 1 (offline)** by running the environment hardening script from terminal.
@@ -87,7 +85,7 @@ Using **native_handle()** for **Thread Management with CPU Affinity** (Pinning a
 C++ abstraction and speak directly to the OS Kernel. So, to pin a thread  - we must pass the OS specific thread identifier directly to the Kernel API's and since (Windows and Linux) handle CPU scheduling differently,
 we need to use the native handle of the OS.
 
-2. **Raw Socket Zero-copy UDP Listener** utilizing mmap'd ring buffers to completely bypass recvfrom data copies
+2. **Raw Socket Zero-copy UDP Listener** utilizing mmap'd ring buffers to completely bypass recvfrom data copies + **Socket filtering with Berkeley Packet Filter**
 
 How to test if the Server is working:
   a) Open the terminal and cd to the root directory -> enter the following commands in order
@@ -98,36 +96,29 @@ This project uses a dedicated Ethernet cable instead of a generic wifi connectio
 ![Using eno1 for this project](screenshots/ethernet_cable_usage.png)
 
 **How I tested the Raw socket UDP Listener**:
+- Added socket filtering (**Berkeley Packet Filter**) to ensure that only those packets assigned to the correct MAC address get filtered through and sending it to the Kernel via the SO_ATTACH_FILTER option
 - Build and run the project with the correct permissions (need sudo for this)
 - In the machine running Vulcan, opening another terminal window to check the tcpdump logs
 - Used a separate computer (Ubuntu) and used netcat from the terminal to send packets to the machine running the project Vulcan (using the host device's ip address and port number)
 - The logs appear in the tcpdump terminal window and the RX hashes appear in the application terminal window
 - The picture underneath shows how it looks:
 
-![Check the working of UDP Server](screenshots/udp_listener_testing.png)
+![Check the working of UDP Server](screenshots/zero_copy_udp_listener.png)
 
 **Current status:**
 The zero-copy UDP listener is working perfectly. The rxhash values we're seeing are the packet hashes from the kernel's receive flow, and the constant stream of hashes demonstrates that our application is successfully receiving and processing UDP packets in a tight loop. The rxhash: 0x... values — These are the kernel's RSS hash for each received packet. 
 
 **Current problem**:
-The constant stream of rxhash prints means your application is polling the socket in a tight loop and printing the hash for every poll attempt, not just when a packet arrives. The repeating values suggest:
-  - We're using recvfrom() or recvmmsg() in a loop, and the kernel is returning the same packet or status repeatedly
-  - We're reading from the ring buffer without advancing the consumer index (same bug pattern as your SPSC queue earlier!)
-  - The same packet is being delivered multiple times because the receive queue isn't being drained properly
+ - The total number of system calls being made is not fully confirmed in the hot path
     
 **Next focus on solving this problem**:
-  - Advancing the consumer/read index after processing each packet
-  - Only printing when a new packet arrives (track sequence numbers or compare timestamps)
-  - Verifying the actual payload is received correctly
-
-The repeating rxhash values (especially 0x74ad68d appearing 4 times consecutively) strongly suggests you're re-reading the same packet from the ring buffer without advancing the read pointer.
-
-The tcpdump confirms the packet was sent and received correctly on port 8080
+  - Verifying the total number of system calls being made in the hot path
+  - replacing polling with busy polling
 
 **Running tests**
 Tests (Unit + Integration tests) can be run in the terminal from the root directory using the commands given in the below table. All test files will be stored in the tests/ directory.
 
-![Running unit tests from the terminal](screenshots/run_tests.png)
+![Testing from the terminal](screenshots/testing_with_just.png)
 
 **Benchmarking**:
 For measuring benchmarks performance, building a separate benchmark executable with different Makefile command. For the benchmark, creating 2 threads: Producer and consumer (pinned to different cores) which are supposed to run for 100M times. Producer pushes QueueOrder instances to the SPSC Queue and the consumer thread pops it. Storing 8 instances of QueueOrders in a array on the stack and using the Producer thread to take instance from it and push to the queue. Instances capacity is chosen as 8 such that the total space needed = 8 * 64 bytes and it can sit comfortably sit inside the L1-D cache of my processor, avoiding the overflow problem. 
