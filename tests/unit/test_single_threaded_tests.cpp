@@ -141,9 +141,9 @@ pop_element_from_queue(LockFreeSPSCQueue<QueueOrder, 4> &my_queue_ref) {
 }
 
 static int test_fill_to_capacity() {
-  // with capacity n, when we try to push the Nth element to the queue, it should be blocked
-  // (stuck in spin-wait). Test for few seconds, if still blocked, test
-  // successful
+  // with capacity n, when we try to push the Nth element to the queue, it
+  // should be blocked (stuck in spin-wait). Test for few seconds, if still
+  // blocked, test successful
   LockFreeSPSCQueue<QueueOrder, 4> *my_queue =
       LockFreeSPSCQueue<QueueOrder, 4>::create();
   uint64_t local_current_tail = 0;
