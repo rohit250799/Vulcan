@@ -13,11 +13,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <future>
+#include <inttypes.h>
 #include <iostream>
 #include <iterator>
+#include <linux/filter.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
-#include <linux/filter.h>
+#include <linux/net_tstamp.h>
 #include <memory>
 #include <net/if.h>
 #include <netdb.h>
@@ -31,7 +33,6 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/user.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 // export module vulcan.feed.zero_copy_udp_listener;
@@ -39,26 +40,16 @@
 namespace vulcan::feed {
 
 struct sock_filter code[] = {
-    { 0x28, 0, 0, 0x0000000c },
-    { 0x15, 0, 6, 0x000086dd },
-    { 0x30, 0, 0, 0x00000014 },
-    { 0x15, 0, 15, 0x00000011 },
-    { 0x28, 0, 0, 0x00000036 },
-    { 0x15, 12, 0, 0x00001f90 },
-    { 0x28, 0, 0, 0x00000038 },
-    { 0x15, 10, 11, 0x00001f90 },
-    { 0x15, 0, 10, 0x00000800 },
-    { 0x30, 0, 0, 0x00000017 },
-    { 0x15, 0, 8, 0x00000011 },
-    { 0x28, 0, 0, 0x00000014 },
-    { 0x45, 6, 0, 0x00001fff },
-    { 0xb1, 0, 0, 0x0000000e },
-    { 0x48, 0, 0, 0x0000000e },
-    { 0x15, 2, 0, 0x00001f90 },
-    { 0x48, 0, 0, 0x00000010 },
-    { 0x15, 0, 1, 0x00001f90 },
-    { 0x6, 0, 0, 0x00040000 },
-    { 0x6, 0, 0, 0x00000000 },
+    {0x28, 0, 0, 0x0000000c},  {0x15, 0, 6, 0x000086dd},
+    {0x30, 0, 0, 0x00000014},  {0x15, 0, 15, 0x00000011},
+    {0x28, 0, 0, 0x00000036},  {0x15, 12, 0, 0x00001f90},
+    {0x28, 0, 0, 0x00000038},  {0x15, 10, 11, 0x00001f90},
+    {0x15, 0, 10, 0x00000800}, {0x30, 0, 0, 0x00000017},
+    {0x15, 0, 8, 0x00000011},  {0x28, 0, 0, 0x00000014},
+    {0x45, 6, 0, 0x00001fff},  {0xb1, 0, 0, 0x0000000e},
+    {0x48, 0, 0, 0x0000000e},  {0x15, 2, 0, 0x00001f90},
+    {0x48, 0, 0, 0x00000010},  {0x15, 0, 1, 0x00001f90},
+    {0x6, 0, 0, 0x00040000},   {0x6, 0, 0, 0x00000000},
 };
 
 struct sock_fprog bpf = {
@@ -73,9 +64,9 @@ handle_socket_fatal(vulcan::core::ErrorCode code, int saved_errno) noexcept {
 }
 
 int create_capture_socket_or_die() {
-   int sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+  int sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
   //  int sockfd = -1;
-  //int sockfd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_ALL));
+  // int sockfd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_ALL));
   if (sockfd == -1)
     handle_socket_fatal(vulcan::core::ErrorCode::ConnectionLost, errno);
   return sockfd;
@@ -111,9 +102,7 @@ void set_socket_option_or_die(int sockfd, void *optval, socklen_t optlen,
                               int optname = PACKET_VERSION) {
   assert(sockfd != -1 && "Assertion failed, sockfd is -1 \n");
   int set_socket_option_result =
-      setsockopt(sockfd, level, optname, optval, optlen);
-  // int set_socket_option_result =
-  //     setsockopt(sockfd, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf)); // trying on the new packet filtering option
+      setsockopt(sockfd, level, optname, optval, optlen); // level = SOL_SOCKET,
   if (set_socket_option_result < 0)
     handle_socket_fatal(vulcan::core::ErrorCode::ResourceAcquisitionFailed,
                         errno);
@@ -131,7 +120,7 @@ void get_socket_option_or_die(int sockfd, void *optval, socklen_t *optlen,
   return;
 }
 
-//#define SERV_PORT 8080
+// #define SERV_PORT 8080
 #define SERV_PORT htons(8080)
 volatile std::sig_atomic_t vulcan::feed::Zero_Copy_UDP_Listener::sigint = 0;
 
@@ -191,8 +180,21 @@ Zero_Copy_UDP_Listener::Zero_Copy_UDP_Listener() {
   sockfd = -1;
   int version = TPACKET_V3;
   sockfd = create_capture_socket_or_die();
-  void* bpf_void_ptr = reinterpret_cast<void*>(&bpf);
-  set_socket_option_or_die(sockfd, bpf_void_ptr, sizeof(bpf), SOL_SOCKET, SO_ATTACH_FILTER);
+  void *bpf_void_ptr = reinterpret_cast<void *>(&bpf);
+  set_socket_option_or_die(sockfd, bpf_void_ptr, sizeof(bpf), SOL_SOCKET,
+                           SO_ATTACH_FILTER);
+  assert(sockfd != -1 && "Assertion failed: Socket creation returned -1\n");
+  int busy_poll_usecs =
+      50; // Poll driver ndo_busy_poll for 50 us before yielding
+  set_socket_option_or_die(sockfd, &busy_poll_usecs, sizeof(busy_poll_usecs),
+                           SOL_SOCKET, SO_BUSY_POLL);
+  assert(sockfd != -1 && "Assertion failed: Socket creation returned -1\n");
+  int flags = SOF_TIMESTAMPING_RX_SOFTWARE |
+              SOF_TIMESTAMPING_SOFTWARE; // request rx timestamps when data
+                                         // enters the Kernel or report when any
+                                         // software timestamps available
+  set_socket_option_or_die(sockfd, &flags, sizeof(flags), SOL_SOCKET,
+                           SO_TIMESTAMPING);
   assert(sockfd != -1 && "Assertion failed: Socket creation returned -1\n");
   set_socket_option_or_die(sockfd, &version, sizeof(version));
 }
@@ -266,7 +268,13 @@ void Zero_Copy_UDP_Listener::display(struct tpacket3_hdr *ppd) {
     sd.sin_addr.s_addr = ip->daddr;
     getnameinfo((struct sockaddr *)&sd, sizeof(sd), dbuff, sizeof(dbuff), NULL,
                 0, NI_NUMERICHOST);
-    printf("%s -> %s\n", sbuff, dbuff);
+    uint32_t kernel_timestamp_normal = ppd->tp_sec;
+    uint32_t kernel_timestamp_ns_offset = ppd->tp_nsec;
+    uint64_t arrival_timestamp_ns =
+        (static_cast<uint64_t>(kernel_timestamp_normal) * 1000000000ULL) +
+        kernel_timestamp_ns_offset;
+    printf("%s -> %s and arrival timestamp is: %" PRIu64 "\n", sbuff, dbuff,
+           arrival_timestamp_ns);
   }
   printf("rxhash: 0x%x\n", ppd->hv1.tp_rxhash);
   return;
